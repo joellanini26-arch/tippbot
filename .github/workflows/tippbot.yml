@@ -1,0 +1,86 @@
+name: Tippbot
+
+on:
+  schedule:
+    - cron: "17 * * * *"   # jede Stunde, Minute 17 (UTC)
+  workflow_dispatch:        # manueller Start ueber den Actions-Tab
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: tippbot
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Pakete installieren
+        run: pip install -r requirements.txt
+
+      - name: Datenbank laden
+        run: |
+          if git ls-remote --exit-code --heads origin data > /dev/null 2>&1; then
+            git fetch --depth=1 origin data
+            git show FETCH_HEAD:tippbot.db > tippbot.db
+            echo "Datenbank aus Branch data geladen."
+          elif [ -f tippbot.db ]; then
+            echo "Startdatenbank aus dem Repository wird verwendet."
+          else
+            echo "Neue Datenbank wird angelegt."
+          fi
+
+      - name: Bot ausfuehren
+        env:
+          FOOTBALLDATA_KEY: ${{ secrets.FOOTBALLDATA_KEY }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python paper.py
+
+      - name: Dashboard bauen
+        run: python build_site.py
+
+      - name: Datenbank speichern
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/dbsave
+          cp tippbot.db /tmp/dbsave/
+          cd /tmp/dbsave
+          git init -q -b data
+          git config user.name "tippbot"
+          git config user.email "tippbot@users.noreply.github.com"
+          git add tippbot.db
+          git commit -q -m "Datenbank $(date -u +%Y-%m-%d_%H:%M)"
+          git push -q --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" data
+
+      - name: Keepalive (verhindert die Pause nach 60 Tagen ohne Aktivitaet)
+        run: |
+          last=$(git log -1 --format=%ct)
+          now=$(date +%s)
+          if [ $((now - last)) -gt $((45 * 86400)) ]; then
+            git config user.name "tippbot"
+            git config user.email "tippbot@users.noreply.github.com"
+            git commit --allow-empty -q -m "Keepalive"
+            git push -q origin HEAD
+          fi
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
