@@ -3,7 +3,20 @@ name: Tippbot
 on:
   schedule:
     - cron: "17 * * * *"   # jede Stunde, Minute 17 (UTC)
-  workflow_dispatch:        # manueller Start ueber den Actions-Tab
+  workflow_dispatch:        # manueller Start ueber den Actions-Tab oder das Dashboard
+    inputs:
+      multi_start:
+        description: "Multiplikator: neuer Versuch mit diesem Startkapital (leer = kein neuer Versuch)"
+        required: false
+        default: ""
+      multi_target:
+        description: "Multiplikator: Ziel in Fr."
+        required: false
+        default: "5000"
+      multi_days:
+        description: "Multiplikator: Dauer in Tagen"
+        required: false
+        default: "28"
 
 permissions:
   contents: write
@@ -48,6 +61,9 @@ jobs:
           FOOTBALLDATA_KEY: ${{ secrets.FOOTBALLDATA_KEY }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MULTI_START: ${{ inputs.multi_start }}
+          MULTI_TARGET: ${{ inputs.multi_target }}
+          MULTI_DAYS: ${{ inputs.multi_days }}
         run: python paper.py
 
       - name: Dashboard bauen

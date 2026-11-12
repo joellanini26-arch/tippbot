@@ -10,11 +10,13 @@ Liegt im selben Ordner wie bot.py.
 """
 import argparse
 import itertools
+import os
 import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
 
 import bot
+import multi
 import notify
 
 # ---------- Einstellungen ----------
@@ -400,6 +402,15 @@ def build_tips_text(placed, emoji=False):
     return "\n".join(lines)
 
 
+def _env_num(name):
+    """Zahl aus einer Umgebungsvariable (Eingaben des GitHub-Workflows), sonst None."""
+    v = (os.environ.get(name) or "").strip().replace("'", "").replace(",", ".")
+    try:
+        return float(v) if v else None
+    except ValueError:
+        return None
+
+
 def main():
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="replace")   # Sonderzeichen in Teamnamen sicher ausgeben
@@ -407,11 +418,28 @@ def main():
     ap.add_argument("--days", type=int, default=3)
     ap.add_argument("--no-fetch", action="store_true")
     ap.add_argument("--no-telegram", action="store_true")
+    ap.add_argument("--multi-start", type=float, default=_env_num("MULTI_START"),
+                    help="neuer Multiplikator-Versuch: Startkapital")
+    ap.add_argument("--multi-target", type=float, default=_env_num("MULTI_TARGET"),
+                    help="neuer Multiplikator-Versuch: Ziel")
+    ap.add_argument("--multi-days", type=float, default=_env_num("MULTI_DAYS"),
+                    help="neuer Multiplikator-Versuch: Dauer in Tagen")
     args = ap.parse_args()
 
     con = sqlite3.connect(bot.DB_PATH)
     bot.init_db(con)
     init_bets(con)
+    multi.init(con)
+    if args.multi_start:
+        try:
+            rid = multi.start_run(con, args.multi_start,
+                                  args.multi_target or multi.DEFAULT_TARGET,
+                                  args.multi_days or multi.DEFAULT_DAYS)
+            print(f"Multiplikator: neuer Versuch #{rid} gestartet")
+        except ValueError as e:
+            print(f"Multiplikator: {e}")
+    else:
+        multi.ensure_first_run(con)
     if not args.no_fetch:
         bot.fetch_matches(con)
 
@@ -431,14 +459,24 @@ def main():
         botd_text = build_botd_text(botd, botd_record(con))
         print("\n" + build_botd_text(botd, botd_record(con), emoji=False))
 
+    multi_events = multi.settle(con)
+    multi_placed = multi.place(con)
+    multi_text = multi.build_text(multi_placed, multi_events)
+    if multi_text:
+        print("\n" + multi.build_text(multi_placed, multi_events, emoji=False))
+    elif multi_placed == {}:
+        print("\nMultiplikator: gerade keine passende Kombi, naechster Versuch beim naechsten Lauf")
+
     if args.no_telegram:
         pass
-    elif not results and not placed and botd is None:
+    elif not results and not placed and botd is None and not multi_text:
         print("\nTelegram: nichts Neues, keine Nachricht gesendet")
     else:
         parts = []
         if botd_text:
             parts.append(botd_text)
+        if multi_text:
+            parts.append(multi_text)
         if results:
             parts.append(build_report(results, acc, emoji=True))
         if placed:

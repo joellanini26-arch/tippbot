@@ -11,6 +11,7 @@ import sys
 from datetime import datetime, timezone
 
 import bot
+import multi
 import paper
 
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "site")
@@ -160,6 +161,8 @@ def build_data(con):
                              "legs": c["legs"]})
     data["bets"].sort(key=lambda b: b["utc"], reverse=True)
     data["bets"] = data["bets"][:MAX_BETS]
+    data["multi"] = multi.data(con)
+    data["repo"] = os.environ.get("GITHUB_REPOSITORY", "joellanini26-arch/tippbot")
     return data
 
 
@@ -169,6 +172,7 @@ def main():
     con = sqlite3.connect(bot.DB_PATH)
     bot.init_db(con)
     paper.init_bets(con)
+    multi.init(con)
     data = build_data(con)
     con.close()
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
@@ -237,6 +241,15 @@ th{color:var(--mute);font-weight:500;font-size:12px}
 .badge{font-size:11px;border-radius:6px;padding:1px 6px;background:var(--line);color:var(--mute)}
 .note{color:var(--mute);font-size:12px;margin:8px 0}
 svg text{fill:var(--mute);font-size:11px}
+.prog{height:10px;border-radius:5px;background:var(--line);overflow:hidden;margin:6px 0}
+.prog i{display:block;height:100%;background:var(--acc)}
+.form{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:8px 0}
+.form label{font-size:12px;color:var(--mute);display:flex;flex-direction:column;gap:4px;min-width:0}
+.form input{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 8px;width:100%;min-width:0}
+.btn{font:inherit;font-weight:600;background:var(--acc);color:#fff;border:0;border-radius:8px;padding:8px 14px;cursor:pointer}
+.btn:disabled{opacity:.6;cursor:default}
+.link{font:inherit;font-size:12px;background:none;border:0;color:var(--acc);padding:0;cursor:pointer;text-decoration:underline}
+h2{font-size:15px;margin:16px 0 8px}
 </style>
 </head>
 <body>
@@ -249,7 +262,7 @@ svg text{fill:var(--mute);font-size:11px}
 <main id="view"></main>
 <script>
 const D = __DATA__;
-const TABS = [["tips","Tipps"],["konto","Konto"],["wetten","Wetten"],["tabelle","Tabelle"],["modell","Modell"]];
+const TABS = [["tips","Tipps"],["multi","Multiplikator"],["konto","Konto"],["wetten","Wetten"],["tabelle","Tabelle"],["modell","Modell"]];
 const KIND = {"1X2":"Tipp","SCORE":"Resultat","OU":"Over/Under","BOTD":"Bet of the day"};
 const PICKS = {"1":"Heimsieg","2":"Auswärtssieg","1X":"Heimsieg oder Unentschieden","X2":"Auswärtssieg oder Unentschieden"};
 const pickLabel = p => p.startsWith("Over") ? "Über " + p.split(" ")[1] + " Tore" : p.startsWith("Under") ? "Unter " + p.split(" ")[1] + " Tore" : (PICKS[p] || p);
@@ -399,7 +412,102 @@ function modell() {
     t.map((r, i) => `<tr><td>${i + 1}</td><td>${esc(r.team)}</td><td>${r.att.toFixed(2)}</td><td>${r.dfn.toFixed(2)}</td><td><b>${r.total.toFixed(2)}</b></td></tr>`).join("") + "</tbody></table></div>";
 }
 
-const VIEWS = {tips, konto, wetten, tabelle, modell};
+const RUNSTATUS = {ACTIVE: "läuft", REACHED: "Ziel erreicht 🏆", LOST: "verloren", EXPIRED: "Zeit abgelaufen", CANCELLED: "abgebrochen"};
+const fr = v => Number(v).toLocaleString("de-CH", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const day = iso => new Date(iso).toLocaleDateString("de-CH", {timeZone: "Europe/Zurich", day: "2-digit", month: "2-digit", year: "2-digit"});
+let multiMsg = "";
+
+function multiBetCard(b, i) {
+  const open = b.status === "OPEN";
+  const res = open ? '<span class="badge">offen</span>'
+    : b.status === "CANCELLED" ? '<span class="badge">verfallen</span>'
+    : `<b class="${cls(b.profit)}">${chf(b.profit || 0)} Fr.</b>`;
+  const legs = b.legs.map(l => `<div class="s">${LEGMARK[l.state]} ${dt(l.utc)} · ${esc(l.home)} – ${esc(l.away)}: <b>${esc(pickLabel(l.pick))}</b> <small>@${l.odds.toFixed(2)} · ${pct(l.prob)}</small>${l.hg != null ? " · " + l.hg + ":" + l.ag : ""}</div>`).join("");
+  const after = b.pot_after != null ? ` → Topf <b>${fr(b.pot_after)}</b>` : open ? ` → bei Treffer <b>${fr(b.stake * b.odds)}</b>` : "";
+  const saved = b.saved ? `<div class="s">🏦 ${fr(b.saved)} Fr. aufs Sparkonto</div>` : "";
+  return `<div class="card"${open ? ' style="border-color:var(--acc)"' : ""}>
+    <div class="bet"><div class="l"><div class="t">Stufe ${i + 1} · Kombi @${b.odds.toFixed(2)} · ${pct(b.prob)}</div>
+    <div class="s">Einsatz ${fr(b.stake)} Fr.${after}</div></div><div class="r">${res}</div></div>
+    <div style="margin-top:6px">${legs}</div>${saved}</div>`;
+}
+
+function multi() {
+  const M = D.multi || {runs: []};
+  const runs = M.runs;
+  const cur = runs.find(r => r.status === "ACTIVE") || runs[0];
+  const m = (l, v, c) => `<div class="metric"><span>${l}</span><b class="${c || ""}">${v}</b></div>`;
+  let h = '<div class="note">Der Bot setzt jeweils den ganzen Topf auf eine Kombi mit Quote um 2.0 und setzt den Gewinn weiter. ' +
+    `Nach je ${M.rules ? M.rules.save_every : 3} Treffern gehen ${M.rules ? Math.round(M.rules.save_share * 100) : 50} % des Gewinns aufs Sparkonto. Eine verlorene Kombi kostet den Topf und beendet den Versuch. Fake-Geld.</div>`;
+  if (cur) {
+    const total = cur.pot + cur.savings;
+    const prog = total > cur.start ? Math.min(1, Math.log(total / cur.start) / Math.log(cur.target / cur.start)) : 0;
+    const left = Math.max(0, (new Date(cur.ends_at) - new Date(D.generated)) / 86400000);
+    h += `<div class="card"><div class="meta"><span>Versuch #${cur.id} · ${RUNSTATUS[cur.status]}</span><span>${day(cur.created_at)} – ${day(cur.ends_at)}</span></div>
+      <div class="teams">${fr(total)} Fr. von ${fr(cur.target)} Fr.</div>
+      <div class="prog"><i style="width:${(prog * 100).toFixed(1)}%"></i></div>
+      <div class="probs"><span>×${(total / cur.start).toFixed(1)}</span><span>Ziel ×${(cur.target / cur.start).toFixed(0)}</span></div></div>
+      <div class="grid">
+      ${m("Topf (wird gesetzt)", fr(cur.pot) + " Fr.")}
+      ${m("Sparkonto", fr(cur.savings) + " Fr.")}
+      ${m("Startkapital", fr(cur.start) + " Fr.")}
+      ${cur.status === "ACTIVE" ? m("Verbleibend", left >= 1 ? Math.ceil(left) + " Tage" : Math.round(left * 24) + " Std.") : m("Ergebnis", chf(total - cur.start) + " Fr.", cls(total - cur.start))}
+      ${m("Treffer bis Sparrunde", cur.streak + " / " + (M.rules ? M.rules.save_every : 3))}
+      ${m("Treffer gesamt", cur.wins)}
+      </div>`;
+    if (cur.status === "ACTIVE" && cur.need != null)
+      h += `<div class="note">Noch etwa <b>${cur.need} Treffer in Folge</b> nötig (bei Quote ~2.0). Bei rund 45 % Trefferchance pro Kombi entspricht das einer Chance von etwa ${cur.chance >= 0.01 ? Math.round(cur.chance * 100) + " %" : "1 zu " + Math.round(1 / cur.chance).toLocaleString("de-CH")}.</div>`;
+    if (cur.status === "ACTIVE" && !cur.bets.some(b => b.status === "OPEN"))
+      h += '<div class="card empty">Gerade keine Kombi offen. Der Bot sucht bei jedem Lauf (stündlich) nach Spielen in den nächsten 36 Stunden, die eine Kombi um 2.0 ergeben.</div>';
+    const bets = cur.bets.map(multiBetCard).reverse();
+    if (bets.length) h += "<h2>Kombis in diesem Versuch</h2>" + bets.join("");
+  }
+  const d = M.defaults || {start: 100, target: 5000, days: 28};
+  h += `<h2>Neuer Versuch</h2><div class="card">
+    <div class="form">
+      <label>Startkapital (Fr.)<input id="m-start" type="number" inputmode="decimal" min="1" step="any" value="${d.start}"></label>
+      <label>Ziel (Fr.)<input id="m-target" type="number" inputmode="decimal" min="1" step="any" value="${d.target}"></label>
+      <label>Dauer (Tage)<input id="m-days" type="number" inputmode="numeric" min="1" step="1" value="${d.days}"></label>
+    </div>
+    <div class="row" style="flex-wrap:wrap"><button class="btn" id="m-go">Neuen Versuch starten</button>
+      <button class="link" id="m-token">GitHub-Token ändern</button></div>
+    <div class="note" id="m-msg">${esc(multiMsg)}</div>
+    <div class="note">Startet den Bot auf GitHub mit diesen Werten. Ein laufender Versuch wird dabei abgebrochen. Nach etwa 2 bis 5 Minuten erscheint der neue Versuch hier.
+      Alternativ: <a href="https://github.com/${esc(D.repo)}/actions/workflows/tippbot.yml" target="_blank" rel="noopener">im Actions-Tab</a> „Run workflow“ wählen und die Felder ausfüllen.</div></div>`;
+  if (runs.length)
+    h += `<h2>Alle Versuche</h2><div class="card scroll"><table><thead><tr><th>#</th><th>Zeitraum</th><th>Start</th><th>Ziel</th><th>Ende</th><th>Status</th></tr></thead><tbody>` +
+      runs.map(r => `<tr><td>${r.id}</td><td>${day(r.created_at).slice(0, 6)} · ${r.days} T.</td><td>${fr(r.start)}</td><td>${fr(r.target)}</td><td><b class="${cls(r.pot + r.savings - r.start)}">${fr(r.pot + r.savings)}</b></td><td>${RUNSTATUS[r.status] || r.status}</td></tr>`).join("") +
+      "</tbody></table></div>";
+  return h;
+}
+
+function askToken() {
+  const t = prompt("Für den Start braucht das Dashboard einmalig ein GitHub-Token (Fine-grained, nur für dieses Repository, Berechtigung „Actions: Read and write“). Es wird nur in diesem Browser gespeichert.", "");
+  if (t && t.trim()) { set("gh_token", t.trim()); return t.trim(); }
+  return null;
+}
+
+async function startMulti() {
+  const s = parseFloat($("#m-start").value), t = parseFloat($("#m-target").value), d = parseInt($("#m-days").value, 10);
+  const msg = x => { multiMsg = x; const e = $("#m-msg"); if (e) e.textContent = x; };
+  if (!(s > 0) || !(t > s) || !(d > 0)) return msg("Bitte gültige Werte eingeben: Ziel muss grösser als das Startkapital sein, Dauer mindestens 1 Tag.");
+  const active = (D.multi.runs || []).some(r => r.status === "ACTIVE");
+  if (!confirm(`Neuer Versuch: ${fr(s)} Fr. → ${fr(t)} Fr. in ${d} Tagen.` + (active ? "\nDer laufende Versuch wird abgebrochen." : "") + "\nStarten?")) return;
+  const tok = get("gh_token", "") || askToken();
+  if (!tok) return msg("Ohne GitHub-Token kann das Dashboard den Bot nicht starten.");
+  const btn = $("#m-go"); btn.disabled = true; msg("Wird gestartet …");
+  try {
+    const r = await fetch(`https://api.github.com/repos/${D.repo}/actions/workflows/tippbot.yml/dispatches`, {
+      method: "POST",
+      headers: {Authorization: "Bearer " + tok, Accept: "application/vnd.github+json"},
+      body: JSON.stringify({ref: "main", inputs: {multi_start: String(s), multi_target: String(t), multi_days: String(d)}})});
+    if (r.status === 204) msg("Gestartet. Der neue Versuch erscheint in etwa 2 bis 5 Minuten (Seite neu laden).");
+    else if (r.status === 401 || r.status === 403 || r.status === 404) { set("gh_token", ""); msg(`GitHub hat den Start abgelehnt (${r.status}). Das Token fehlt, ist abgelaufen oder hat nicht die Berechtigung „Actions: Read and write“ für dieses Repository. Beim nächsten Klick wird es neu abgefragt.`); }
+    else msg("Fehler beim Starten: " + r.status + " " + (await r.text()).slice(0, 200));
+  } catch (e) { msg("Keine Verbindung zu GitHub: " + e.message); }
+  btn.disabled = false;
+}
+
+const VIEWS = {tips, multi, konto, wetten, tabelle, modell};
 function render() {
   $("#tabs").innerHTML = TABS.map(t => `<button data-tab="${t[0]}" class="${state.tab === t[0] ? "on" : ""}">${t[1]}</button>`).join("");
   $("#view").innerHTML = VIEWS[state.tab]();
@@ -408,7 +516,10 @@ $("#lg").innerHTML = '<option value="ALL">Alle Ligen</option>' + Object.keys(D.l
 $("#lg").value = state.league;
 $("#lg").addEventListener("change", e => { state.league = e.target.value; set("league", state.league); render(); });
 $("#tabs").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; state.tab = b.dataset.tab; history.replaceState(null, "", "#" + state.tab); render(); window.scrollTo(0, 0); });
-$("#view").addEventListener("click", e => { const b = e.target.closest("button[data-kind]"); if (!b) return; state.kind = b.dataset.kind; render(); });
+$("#view").addEventListener("click", e => {
+  if (e.target.closest("#m-go")) return startMulti();
+  if (e.target.closest("#m-token")) { askToken(); return; }
+  const b = e.target.closest("button[data-kind]"); if (!b) return; state.kind = b.dataset.kind; render(); });
 $("#stand").textContent = "Stand: " + new Date(D.generated).toLocaleString("de-CH", {timeZone: "Europe/Zurich", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"}) + " · Fake-Geld, keine echten Wetten";
 render();
 setTimeout(() => location.reload(), 10 * 60 * 1000);
