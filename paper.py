@@ -27,6 +27,12 @@ STAKE_OU = 5.0           # Einsatz auf den Over/Under-Tipp
 OU_LINE = 2.5            # Over/Under-Grenze (moeglich: 1.5, 2.5, 3.5)
 MARGIN = 0.10            # Buchmacher-Marge auf die Modell-Quoten
 
+# Der Bot tippt nur, wo er sich sicher genug ist (Modell-Wahrscheinlichkeit mindestens):
+MIN_PROB_1X2 = 0.60      # 1/X/2-Tipp
+MIN_PROB_OU = 0.65       # Over/Under
+MIN_PROB_SCORE = 0.15    # exaktes Resultat (ist immer unsicher, daher tiefe Schwelle)
+MIN_GAMES = 8            # beide Teams brauchen so viele Spiele in den Daten
+
 # Bet of the day: eine Kombiwette pro Tag aus mehreren sehr wahrscheinlichen Einzeltipps
 STAKE_BOTD = 50.0          # Einsatz
 BOTD_MIN_LEGS = 2          # mindestens so viele Tipps in der Kombi (muss eine Kombi sein)
@@ -90,6 +96,21 @@ def get_model(con, code):
     return _models[code]
 
 
+def selected_bets(p):
+    """Nur die Tipps, bei denen das Modell ueber der Schwelle liegt: [(kind, pick, prob)]."""
+    probs = {"1": p["p_home"], "X": p["p_draw"], "2": p["p_away"]}
+    p_over = p[f"p_o{int(OU_LINE * 10)}"]
+    ou_pick, ou_prob = (("Over", p_over) if p_over >= 0.5 else ("Under", 1 - p_over))
+    out = []
+    if probs[p["tip_1x2"]] >= MIN_PROB_1X2:
+        out.append(("1X2", p["tip_1x2"], probs[p["tip_1x2"]]))
+    if p["score_prob"] >= MIN_PROB_SCORE:
+        out.append(("SCORE", p["tip_score"], p["score_prob"]))
+    if ou_prob >= MIN_PROB_OU:
+        out.append(("OU", f"{ou_pick} {OU_LINE}", ou_prob))
+    return out
+
+
 def place_bets(con, days):
     now = datetime.now(timezone.utc)
     placed = []
@@ -109,16 +130,13 @@ def place_bets(con, days):
                 continue
             if home not in model["att"] or away not in model["att"]:
                 continue
+            games = model.get("n_games", {})
+            if min(games.get(home, 0), games.get(away, 0)) < MIN_GAMES:
+                continue
             p = bot.predict(model, home, away)
-            probs = {"1": p["p_home"], "X": p["p_draw"], "2": p["p_away"]}
-            p_over = p[f"p_o{int(OU_LINE * 10)}"]
-            ou_pick, ou_prob = (("Over", p_over) if p_over >= 0.5 else ("Under", 1 - p_over))
-            bets = [
-                ("1X2", p["tip_1x2"], STAKE_1X2, make_odds(probs[p["tip_1x2"]])),
-                ("SCORE", p["tip_score"], STAKE_SCORE, make_odds(p["score_prob"])),
-                ("OU", f"{ou_pick} {OU_LINE}", STAKE_OU, make_odds(ou_prob)),
-            ]
-            for kind, pick, stake, odds in bets:
+            for kind, pick, prob in selected_bets(p):
+                stake = {"1X2": STAKE_1X2, "SCORE": STAKE_SCORE, "OU": STAKE_OU}[kind]
+                odds = make_odds(prob)
                 cur = con.execute(
                     "INSERT OR IGNORE INTO bets (match_id, kind, pick, stake, odds, placed_at) "
                     "VALUES (?,?,?,?,?,?)", (mid, kind, pick, stake, odds, now.isoformat()))

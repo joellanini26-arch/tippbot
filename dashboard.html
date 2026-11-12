@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f19" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f5f6fa" media="(prefers-color-scheme: light)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Tippbot</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%BD%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f5f6fa;--card:#ffffff;--card2:#f0f2f7;--fg:#0f172a;--mute:#64748b;--line:rgba(15,23,42,.08);
+  --acc:#4f46e5;--acc2:#7c3aed;--accsoft:rgba(79,70,229,.10);--pos:#059669;--possoft:rgba(5,150,105,.12);
+  --neg:#e11d48;--negsoft:rgba(225,29,72,.10);--warn:#d97706;
+  --b1:#4f46e5;--bx:#94a3b8;--b2:#f59e0b;
+  --shadow:0 1px 2px rgba(15,23,42,.04),0 4px 16px rgba(15,23,42,.06);
+  --glass:rgba(245,246,250,.82);
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0b0f19;--card:#131a2a;--card2:#1a2235;--fg:#e8ecf4;--mute:#8b97ad;--line:rgba(255,255,255,.07);
+  --acc:#818cf8;--acc2:#a78bfa;--accsoft:rgba(129,140,248,.14);--pos:#34d399;--possoft:rgba(52,211,153,.13);
+  --neg:#fb7185;--negsoft:rgba(251,113,133,.13);--warn:#fbbf24;
+  --b1:#818cf8;--bx:#5b6780;--b2:#fbbf24;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25);
+  --glass:rgba(11,15,25,.78);
+}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-feature-settings:"cv11","ss01";-webkit-font-smoothing:antialiased}
+.num{font-variant-numeric:tabular-nums}
+a{color:var(--acc)}
+
+/* Kopfzeile */
+header{position:sticky;top:0;z-index:20;border-bottom:1px solid var(--line);padding:calc(env(safe-area-inset-top) + 10px) 16px 0}
+header::before{content:"";position:absolute;inset:0;z-index:-1;background:var(--glass);backdrop-filter:saturate(180%) blur(16px);-webkit-backdrop-filter:saturate(180%) blur(16px)}
+.top{display:flex;align-items:center;gap:12px;max-width:880px;margin:0 auto}
+.logo{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-size:20px;background:linear-gradient(135deg,var(--acc),var(--acc2));box-shadow:0 4px 14px rgba(79,70,229,.35);flex:none}
+.brand{flex:1;min-width:0}
+h1{font-size:18px;font-weight:800;letter-spacing:-.02em;margin:0}
+.sub{color:var(--mute);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+select{appearance:none;-webkit-appearance:none;font:inherit;font-size:13px;font-weight:600;color:var(--fg);background:var(--card) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2364748b' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 12px center;border:1px solid var(--line);border-radius:999px;padding:8px 30px 8px 14px;max-width:46vw;box-shadow:var(--shadow)}
+
+/* Navigation: oben am Desktop, unten am Handy */
+nav{display:flex;gap:4px;max-width:880px;margin:10px auto 0;overflow-x:auto;scrollbar-width:none}
+nav::-webkit-scrollbar{display:none}
+nav button{flex:none;display:flex;align-items:center;gap:6px;font:inherit;font-size:14px;font-weight:600;color:var(--mute);background:none;border:0;border-bottom:2px solid transparent;padding:8px 12px 10px;cursor:pointer}
+nav button svg{width:18px;height:18px}
+nav button.on{color:var(--acc);border-color:var(--acc)}
+@media (max-width:719px){
+  header{padding-bottom:10px}
+  nav{position:fixed;left:0;right:0;bottom:0;margin:0;z-index:30;justify-content:space-around;gap:0;background:var(--glass);backdrop-filter:saturate(180%) blur(16px);-webkit-backdrop-filter:saturate(180%) blur(16px);border-top:1px solid var(--line);padding:6px 4px calc(env(safe-area-inset-bottom) + 6px)}
+  nav button{flex:1 1 0;min-width:0;flex-direction:column;gap:3px;font-size:10.5px;font-weight:600;padding:4px 0;border:0;border-radius:12px}
+  nav button svg{width:22px;height:22px}
+  nav button.on{background:var(--accsoft)}
+  main{padding-bottom:calc(env(safe-area-inset-bottom) + 90px)!important}
+}
+main{padding:16px;max-width:880px;margin:0 auto}
+
+/* Bausteine */
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px 16px;margin-bottom:12px;box-shadow:var(--shadow)}
+.hero{position:relative;overflow:hidden;border:0;color:#fff;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 55%,#db2777 130%);box-shadow:0 10px 30px rgba(79,70,229,.3)}
+.hero::after{content:"";position:absolute;right:-60px;top:-60px;width:200px;height:200px;border-radius:50%;background:rgba(255,255,255,.08)}
+.hero .lbl{font-size:12px;font-weight:600;opacity:.8;text-transform:uppercase;letter-spacing:.06em}
+.hero .big{font-size:32px;font-weight:800;letter-spacing:-.03em;margin:2px 0 6px}
+.hero .row2{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;opacity:.92}
+.hero .row2 b{font-weight:700}
+.meta{display:flex;justify-content:space-between;gap:8px;color:var(--mute);font-size:12px;font-weight:500}
+.lg{display:inline-flex;align-items:center;gap:6px}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--acc)}
+.teams{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;margin:10px 0 12px}
+.teams .t{font-weight:700;font-size:15.5px;letter-spacing:-.01em;line-height:1.25}
+.teams .t:last-child{text-align:right}
+.teams .vs{font-size:11px;font-weight:700;color:var(--mute);background:var(--card2);border-radius:8px;padding:3px 7px}
+.bar{display:flex;gap:3px;height:8px}
+.bar i{display:block;height:100%;border-radius:4px;min-width:4px}
+.b1{background:var(--b1)}.bx{background:var(--bx)}.b2{background:var(--b2)}
+.probs{display:flex;justify-content:space-between;font-size:12px;color:var(--mute);margin:6px 0 12px;font-weight:500}
+.probs b{color:var(--fg);font-weight:700}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:5px;background:var(--card2);border-radius:10px;padding:5px 10px;font-size:13px;color:var(--mute)}
+.chip b{color:var(--fg);font-weight:700}
+.chip.tip{background:var(--accsoft);color:var(--acc)}
+.chip.tip b{color:var(--acc)}
+.chip small{opacity:.8}
+.skip{display:flex;align-items:center;gap:8px;color:var(--mute);font-size:13px;border-top:1px dashed var(--line);padding-top:10px;margin-top:2px}
+.tiprow{border-top:1px solid var(--line);padding-top:10px;margin-top:2px}
+.tiprow .h{font-size:11px;font-weight:700;color:var(--acc);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:12px}
+@media(min-width:560px){.grid{grid-template-columns:repeat(3,1fr)}}
+.metric{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px 14px;box-shadow:var(--shadow)}
+.metric span{display:block;color:var(--mute);font-size:12px;font-weight:500}
+.metric b{display:block;font-size:20px;font-weight:800;letter-spacing:-.02em;margin-top:2px;font-variant-numeric:tabular-nums}
+.pos{color:var(--pos)!important}.neg{color:var(--neg)!important}
+.empty{color:var(--mute);text-align:center;padding:28px 12px}
+table{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
+th,td{padding:9px 6px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+th:nth-child(2),td:nth-child(2){text-align:left;width:100%}
+th:first-child,td:first-child{text-align:right;color:var(--mute)}
+th{color:var(--mute);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+.scroll{overflow-x:auto;padding:4px 12px}
+.seg{display:inline-flex;gap:2px;background:var(--card2);border-radius:12px;padding:3px;margin-bottom:12px;max-width:100%;overflow-x:auto;scrollbar-width:none}
+.seg button{flex:none;font:inherit;font-size:13px;font-weight:600;background:none;color:var(--mute);border:0;border-radius:9px;padding:6px 12px;cursor:pointer}
+.seg button.on{background:var(--card);color:var(--fg);box-shadow:var(--shadow)}
+.bet{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.bet .l{min-width:0}.bet .t{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.s{color:var(--mute);font-size:12.5px;margin-top:2px}
+.s b{color:var(--fg)}
+.bet .r{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.badge{display:inline-block;font-size:11px;font-weight:700;border-radius:999px;padding:3px 9px;background:var(--card2);color:var(--mute)}
+.badge.won{background:var(--possoft);color:var(--pos)}
+.badge.lost{background:var(--negsoft);color:var(--neg)}
+.badge.open{background:var(--accsoft);color:var(--acc)}
+.note{color:var(--mute);font-size:12.5px;margin:10px 2px}
+svg text{fill:var(--mute);font-size:11px;font-family:inherit}
+h2{font-size:13px;font-weight:700;color:var(--mute);text-transform:uppercase;letter-spacing:.06em;margin:22px 4px 10px}
+.prog{height:10px;border-radius:999px;background:rgba(255,255,255,.22);overflow:hidden;margin:10px 0 6px}
+.prog i{display:block;height:100%;border-radius:999px;background:#fff}
+.form{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:4px 0 12px}
+.form label{font-size:12px;font-weight:600;color:var(--mute);display:flex;flex-direction:column;gap:5px;min-width:0}
+.form input{font:inherit;font-weight:600;color:var(--fg);background:var(--card2);border:1px solid transparent;border-radius:10px;padding:9px 10px;width:100%;min-width:0;font-variant-numeric:tabular-nums}
+.form input:focus{outline:none;border-color:var(--acc);background:var(--card)}
+.btn{font:inherit;font-weight:700;background:linear-gradient(135deg,var(--acc),var(--acc2));color:#fff;border:0;border-radius:12px;padding:10px 18px;cursor:pointer;box-shadow:0 4px 14px rgba(79,70,229,.3)}
+.btn:disabled{opacity:.6;cursor:default}
+.link{font:inherit;font-size:12.5px;background:none;border:0;color:var(--acc);padding:0;cursor:pointer;font-weight:600}
+.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.legs{margin-top:8px;display:flex;flex-direction:column;gap:6px}
+.leg{display:flex;gap:8px;align-items:flex-start;font-size:13px}
+.leg .ic{flex:none;width:20px;text-align:center}
+.leg small{color:var(--mute)}
+.star{border:1px solid transparent;background:linear-gradient(var(--card),var(--card)) padding-box,linear-gradient(135deg,var(--acc),var(--acc2),#db2777) border-box}
+.kicker{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--acc)}
+</style>
+</head>
+<body>
+<header>
+  <div class="top">
+    <div class="logo">⚽</div>
+    <div class="brand"><h1>Tippbot</h1><div class="sub" id="stand"></div></div>
+    <select id="lg" aria-label="Liga"></select>
+  </div>
+  <nav id="tabs"></nav>
+</header>
+<main id="view"></main>
+<script>
+const D = __DATA__;
+const ICON = {
+  tips: '<path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z"/><path d="m12 7 3.5 2.5-1.3 4h-4.4l-1.3-4Z"/><path d="M12 3v4M15.5 9.5 20 8M14.2 13.5l2.3 4.5M9.8 13.5 7.5 18M8.5 9.5 4 8"/>',
+  multi: '<path d="M4 18 10 12l4 4 6-8"/><path d="M15 8h5v5"/>',
+  konto: '<rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10h18M16 15h2"/>',
+  wetten: '<path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/>',
+  tabelle: '<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0Z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/>',
+  modell: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>'
+};
+const TABS = [["tips","Tipps"],["multi","Multiplikator"],["konto","Konto"],["wetten","Wetten"],["tabelle","Tabelle"],["modell","Modell"]];
+const KIND = {"1X2":"Tipp","SCORE":"Resultat","OU":"Over/Under","BOTD":"Bet of the day"};
+const PICKS = {"1":"Heimsieg","2":"Auswärtssieg","X":"Unentschieden","1X":"Heimsieg oder Unentschieden","X2":"Auswärtssieg oder Unentschieden"};
+const pickLabel = p => p.startsWith("Over") ? "Über " + p.split(" ")[1] + " Tore" : p.startsWith("Under") ? "Unter " + p.split(" ")[1] + " Tore" : (PICKS[p] || p);
+const STATUS = {OPEN:"offen",WON:"gewonnen",LOST:"verloren",VOID:"storniert",CANCELLED:"verfallen"};
+const BADGE = {OPEN:"open",WON:"won",LOST:"lost"};
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const dt = iso => iso.endsWith("T00:00:00Z")
+  ? new Date(iso).toLocaleDateString("de-CH",{timeZone:"UTC",weekday:"short",day:"2-digit",month:"2-digit"})
+  : new Date(iso).toLocaleString("de-CH",{timeZone:"Europe/Zurich",weekday:"short",day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
+const pct = v => v == null ? "–" : Math.round(v*100) + "%";
+const chf = v => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(2);
+const fr = v => Number(v).toLocaleString("de-CH", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const day = iso => new Date(iso).toLocaleDateString("de-CH", {timeZone: "Europe/Zurich", day: "2-digit", month: "2-digit", year: "2-digit"});
+const cls = v => v > 0 ? "pos" : v < 0 ? "neg" : "";
+const lname = c => c === "MIX" ? "Kombi" : (D.leagues[c] || c);
+const badge = s => `<span class="badge ${BADGE[s] || ""}">${STATUS[s] || s}</span>`;
+let store = {}; try { store = window.localStorage; } catch (e) {}
+const get = (k, d) => { try { return store.getItem(k) || d; } catch (e) { return d; } };
+const set = (k, v) => { try { store.setItem(k, v); } catch (e) {} };
+let state = {league: get("league","ALL"), tab: (location.hash || "").slice(1) || "tips", kind: "ALL", only: get("only","0") === "1"};
+if (state.league !== "ALL" && !D.leagues[state.league]) state.league = "ALL";
+if (!TABS.some(t => t[0] === state.tab)) state.tab = "tips";
+const inLeague = r => state.league === "ALL" || r.league === state.league;
+const oneLeague = () => state.league !== "ALL" ? state.league : Object.keys(D.leagues)[0];
+const m = (l, v, c) => `<div class="metric"><span>${l}</span><b class="${c || ""}">${v}</b></div>`;
+const LEGMARK = {WON: "✅", LOST: "❌", VOID: "↩️", OPEN: "⏳"};
+const legList = legs => `<div class="legs">` + legs.map(l => `<div class="leg"><span class="ic">${LEGMARK[l.state]}</span><div>${esc(l.home)} – ${esc(l.away)}: <b>${esc(pickLabel(l.pick))}</b><br><small>${l.utc ? dt(l.utc) + " · " : ""}@${l.odds.toFixed(2)}${l.prob != null ? " · " + pct(l.prob) : ""}${l.hg != null ? " · Endstand " + l.hg + ":" + l.ag : ""}</small></div></div>`).join("") + "</div>";
+
+function account() {
+  const total = D.daily.reduce((a, r) => a + r.profit, 0);
+  const open = D.open.reduce((a, r) => ({n: a.n + r.n, stake: a.stake + r.stake}), {n: 0, stake: 0});
+  return {bal: D.start_balance + total, total, open};
+}
+
+function botdCard() {
+  const b = D.botd;
+  if (!b || !inLeague(b)) return "";
+  const res = b.status === "OPEN" ? badge("OPEN") : `<b class="${cls(b.profit)}">${chf(b.profit || 0)} CHF</b>`;
+  return `<div class="card star">
+    <div class="meta"><span class="kicker">⭐ Bet of the day</span><span>${dt(b.utc)}</span></div>
+    ${legList(b.legs)}
+    <div class="chips" style="margin-top:12px"><span class="chip tip">Quote <b>@${b.odds.toFixed(2)}</b></span>
+      <span class="chip">Modell <b>${pct(b.prob)}</b></span>
+      <span class="chip">Einsatz <b>${b.stake.toFixed(0)} CHF</b></span>
+      <span style="margin-left:auto">${res}</span></div></div>`;
+}
+
+function tips() {
+  const all = D.upcoming.filter(inLeague);
+  const rows = state.only ? all.filter(r => r.sel.length) : all;
+  const nTips = all.filter(r => r.sel.length).length;
+  const a = account();
+  let h = `<div class="card hero"><div class="lbl">Kontostand</div><div class="big num">${fr(a.bal)} CHF</div>
+    <div class="row2"><span>G/V <b class="num">${chf(a.total)}</b></span><span>Offen <b>${a.open.n}</b></span><span>Bot tippt bei <b>${nTips}</b> von ${all.length} Spielen</span></div></div>`;
+  h += botdCard();
+  h += `<div class="seg"><button data-only="0" class="${state.only ? "" : "on"}">Alle Spiele</button><button data-only="1" class="${state.only ? "on" : ""}">Nur Bot-Tipps</button></div>`;
+  if (!rows.length) return h + '<div class="card empty">Keine kommenden Spiele gefunden.</div>';
+  const T = D.thresholds || {};
+  return h + rows.map(r => {
+    const o = r.odds || {};
+    const q = k => o[k] ? ` <small>@${o[k].toFixed(2)}</small>` : "";
+    const sel = r.sel.map(([k, pick, prob]) => `<span class="chip tip">${k === "1X2" ? "Tipp" : k === "SCORE" ? "Resultat" : ""} <b>${esc(pick)}</b> <small>${pct(prob)}</small>${q(k)}</span>`).join("");
+    const tipBlock = r.sel.length
+      ? `<div class="tiprow"><div class="h">🎯 Bot-Tipp</div><div class="chips">${sel}</div></div>`
+      : `<div class="skip"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M8 12h8"/></svg>Kein Tipp: zu unsicher</div>`;
+    return `<div class="card">
+      <div class="meta"><span class="lg"><i class="dot"></i>${esc(lname(r.league))}</span><span>${dt(r.utc)}</span></div>
+      <div class="teams"><span class="t">${esc(r.home)}</span><span class="vs">VS</span><span class="t">${esc(r.away)}</span></div>
+      <div class="bar"><i class="b1" style="flex:${r.p1}"></i><i class="bx" style="flex:${r.px}"></i><i class="b2" style="flex:${r.p2}"></i></div>
+      <div class="probs"><span>1 <b>${pct(r.p1)}</b></span><span>X <b>${pct(r.px)}</b></span><span>2 <b>${pct(r.p2)}</b></span></div>
+      <div class="chips" style="margin-bottom:10px">
+        <span class="chip">Wahrscheinlichstes Resultat <b>${esc(r.score)}</b></span>
+        <span class="chip">Ø Tore <b>${(r.eh + r.ea).toFixed(1)}</b></span>
+      </div>${tipBlock}</div>`;
+  }).join("") + `<div class="note">Der Bot tippt nur, wenn das Modell sicher genug ist: Tipp ab ${pct(T["1X2"])}, Over/Under ab ${pct(T.OU)}, Resultat ab ${pct(T.SCORE)}. Quoten erscheinen, sobald die Fake-Wette platziert ist (bis 3 Tage vor Anpfiff).</div>`;
+}
+
+// ---------- Multiplikator ----------
+const RUNSTATUS = {ACTIVE: "läuft", REACHED: "Ziel erreicht 🏆", LOST: "verloren", EXPIRED: "Zeit abgelaufen", CANCELLED: "abgebrochen"};
+let multiMsg = "";
+
+function multiBetCard(b, i) {
+  const open = b.status === "OPEN";
+  const res = open || b.status === "CANCELLED" ? badge(b.status) : `<b class="${cls(b.profit)} num">${chf(b.profit || 0)} Fr.</b>`;
+  const after = b.pot_after != null ? ` → Topf <b>${fr(b.pot_after)}</b>` : open ? ` → bei Treffer <b>${fr(b.stake * b.odds)}</b>` : "";
+  const saved = b.saved ? `<div class="chip" style="margin-top:10px">🏦 <b>${fr(b.saved)} Fr.</b> aufs Sparkonto</div>` : "";
+  return `<div class="card${open ? " star" : ""}">
+    <div class="bet"><div class="l"><div class="kicker">Stufe ${i + 1}</div><div class="t">Kombi @${b.odds.toFixed(2)} · ${pct(b.prob)}</div>
+    <div class="s">Einsatz ${fr(b.stake)} Fr.${after}</div></div><div class="r">${res}</div></div>
+    ${legList(b.legs)}${saved}</div>`;
+}
+
+function multi() {
+  const M = D.multi || {runs: []};
+  const runs = M.runs;
+  const R = M.rules || {save_every: 3, save_share: 0.5};
+  const cur = runs.find(r => r.status === "ACTIVE") || runs[0];
+  let h = "";
+  if (cur) {
+    const total = cur.pot + cur.savings;
+    const prog = total > cur.start ? Math.min(1, Math.log(total / cur.start) / Math.log(cur.target / cur.start)) : 0;
+    const left = Math.max(0, (new Date(cur.ends_at) - new Date(D.generated)) / 86400000);
+    h += `<div class="card hero"><div class="lbl">Versuch #${cur.id} · ${RUNSTATUS[cur.status]}</div>
+      <div class="big num">${fr(total)} Fr.</div>
+      <div class="row2"><span>Ziel <b class="num">${fr(cur.target)} Fr.</b></span><span>×${(total / cur.start).toFixed(1)} von ×${(cur.target / cur.start).toFixed(0)}</span>
+      <span>${cur.status === "ACTIVE" ? "noch <b>" + (left >= 1 ? Math.ceil(left) + " Tage" : Math.round(left * 24) + " Std.") + "</b>" : day(cur.created_at) + " – " + day(cur.ended_at || cur.ends_at)}</span></div>
+      <div class="prog"><i style="width:${Math.max(2, prog * 100).toFixed(1)}%"></i></div></div>
+      <div class="grid">
+      ${m("Topf (wird gesetzt)", fr(cur.pot) + " Fr.")}
+      ${m("Sparkonto 🏦", fr(cur.savings) + " Fr.")}
+      ${m("Startkapital", fr(cur.start) + " Fr.")}
+      ${m("Treffer bis Sparrunde", cur.streak + " / " + R.save_every)}
+      ${m("Treffer gesamt", cur.wins)}
+      ${cur.status === "ACTIVE" && cur.need != null ? m("Noch nötig", cur.need + " in Folge") : m("Ergebnis", chf(total - cur.start) + " Fr.", cls(total - cur.start))}
+      </div>`;
+    if (cur.status === "ACTIVE" && cur.need != null)
+      h += `<div class="note">Bei rund 45 % Trefferchance pro Kombi liegt die Chance, das Ziel zu erreichen, bei etwa ${cur.chance >= 0.01 ? Math.round(cur.chance * 100) + " %" : "1 zu " + Math.round(1 / cur.chance).toLocaleString("de-CH")}.</div>`;
+    if (cur.status === "ACTIVE" && !cur.bets.some(b => b.status === "OPEN"))
+      h += '<div class="card empty">Gerade keine Kombi offen. Der Bot sucht stündlich nach Spielen in den nächsten 36 Stunden, die eine Kombi um 2.0 ergeben.</div>';
+    const bets = cur.bets.map(multiBetCard).reverse();
+    if (bets.length) h += "<h2>Kombis in diesem Versuch</h2>" + bets.join("");
+  }
+  const d = M.defaults || {start: 100, target: 5000, days: 28};
+  h += `<h2>Neuer Versuch</h2><div class="card">
+    <div class="form">
+      <label>Startkapital<input id="m-start" type="number" inputmode="decimal" min="1" step="any" value="${d.start}"></label>
+      <label>Ziel<input id="m-target" type="number" inputmode="decimal" min="1" step="any" value="${d.target}"></label>
+      <label>Tage<input id="m-days" type="number" inputmode="numeric" min="1" step="1" value="${d.days}"></label>
+    </div>
+    <div class="row"><button class="btn" id="m-go">Neuen Versuch starten</button><button class="link" id="m-token">GitHub-Token ändern</button></div>
+    <div class="note" id="m-msg">${esc(multiMsg)}</div>
+    <div class="note" style="margin-bottom:0">Startet den Bot auf GitHub mit diesen Werten. Ein laufender Versuch wird dabei abgebrochen. Der neue Versuch erscheint nach etwa 2 bis 5 Minuten.
+      Alternativ <a href="https://github.com/${esc(D.repo)}/actions/workflows/tippbot.yml" target="_blank" rel="noopener">im Actions-Tab</a> „Run workflow“ wählen.</div></div>`;
+  if (runs.length)
+    h += `<h2>Alle Versuche</h2><div class="card scroll"><table><thead><tr><th>#</th><th>Start</th><th>Kapital</th><th>Ziel</th><th>Ende</th><th>Status</th></tr></thead><tbody>` +
+      runs.map(r => `<tr><td>${r.id}</td><td>${day(r.created_at).slice(0, 6)} · ${r.days} T.</td><td>${fr(r.start)}</td><td>${fr(r.target)}</td><td><b class="${cls(r.pot + r.savings - r.start)}">${fr(r.pot + r.savings)}</b></td><td>${RUNSTATUS[r.status] || r.status}</td></tr>`).join("") +
+      "</tbody></table></div>";
+  h += `<div class="note">Der Bot setzt jeweils den ganzen Topf auf eine Kombi mit Quote um 2.0 und setzt den Gewinn weiter. Nach je ${R.save_every} Treffern gehen ${Math.round(R.save_share * 100)} % des Gewinns aufs Sparkonto. Eine verlorene Kombi kostet den Topf und beendet den Versuch. Fake-Geld.</div>`;
+  return h;
+}
+
+function askToken() {
+  const t = prompt("Für den Start braucht das Dashboard einmalig ein GitHub-Token (Fine-grained, nur für dieses Repository, Berechtigung „Actions: Read and write“). Es wird nur in diesem Browser gespeichert.", "");
+  if (t && t.trim()) { set("gh_token", t.trim()); return t.trim(); }
+  return null;
+}
+
+async function startMulti() {
+  const s = parseFloat($("#m-start").value), t = parseFloat($("#m-target").value), d = parseInt($("#m-days").value, 10);
+  const msg = x => { multiMsg = x; const e = $("#m-msg"); if (e) e.textContent = x; };
+  if (!(s > 0) || !(t > s) || !(d > 0)) return msg("Bitte gültige Werte eingeben: Ziel muss grösser als das Startkapital sein, Dauer mindestens 1 Tag.");
+  const active = (D.multi.runs || []).some(r => r.status === "ACTIVE");
+  if (!confirm(`Neuer Versuch: ${fr(s)} Fr. → ${fr(t)} Fr. in ${d} Tagen.` + (active ? "\nDer laufende Versuch wird abgebrochen." : "") + "\nStarten?")) return;
+  const tok = get("gh_token", "") || askToken();
+  if (!tok) return msg("Ohne GitHub-Token kann das Dashboard den Bot nicht starten.");
+  const btn = $("#m-go"); btn.disabled = true; msg("Wird gestartet …");
+  try {
+    const r = await fetch(`https://api.github.com/repos/${D.repo}/actions/workflows/tippbot.yml/dispatches`, {
+      method: "POST",
+      headers: {Authorization: "Bearer " + tok, Accept: "application/vnd.github+json"},
+      body: JSON.stringify({ref: "main", inputs: {multi_start: String(s), multi_target: String(t), multi_days: String(d)}})});
+    if (r.status === 204) msg("Gestartet. Der neue Versuch erscheint in etwa 2 bis 5 Minuten (Seite neu laden).");
+    else if (r.status === 401 || r.status === 403 || r.status === 404) { set("gh_token", ""); msg(`GitHub hat den Start abgelehnt (${r.status}). Das Token fehlt, ist abgelaufen oder hat nicht die Berechtigung „Actions: Read and write“ für dieses Repository. Beim nächsten Klick wird es neu abgefragt.`); }
+    else msg("Fehler beim Starten: " + r.status + " " + (await r.text()).slice(0, 200));
+  } catch (e) { msg("Keine Verbindung zu GitHub: " + e.message); }
+  btn.disabled = false;
+}
+
+// ---------- Konto ----------
+function konto() {
+  const days = D.daily.filter(inLeague);
+  const open = D.open.filter(inLeague).reduce((a, r) => ({n: a.n + r.n, stake: a.stake + r.stake}), {n: 0, stake: 0});
+  const total = days.reduce((a, r) => a + r.profit, 0);
+  const staked = days.reduce((a, r) => a + r.staked, 0);
+  const hit = k => { const x = days.filter(r => r.kind === k); const n = x.reduce((a, r) => a + r.n, 0); const w = x.reduce((a, r) => a + r.won, 0); return [n, n ? w / n : null]; };
+  const [n1, h1] = hit("1X2"), [n2, h2] = hit("SCORE"), [n3, h3] = hit("OU"), [n4, h4] = hit("BOTD");
+  const byDay = {};
+  days.forEach(r => byDay[r.day] = (byDay[r.day] || 0) + r.profit);
+  let bal = D.start_balance; const pts = [["Start", bal]];
+  Object.keys(byDay).sort().forEach(d => { bal += byDay[d]; pts.push([d, bal]); });
+  return `<div class="card hero"><div class="lbl">Kontostand${state.league !== "ALL" ? " · " + esc(lname(state.league)) : ""}</div>
+    <div class="big num">${fr(D.start_balance + total)} CHF</div>
+    <div class="row2"><span>G/V <b class="num">${chf(total)}</b></span><span>Rendite <b>${staked ? pct(total / staked) : "–"}</b></span><span>Offen <b>${open.n}</b> (${open.stake.toFixed(0)} CHF)</span></div></div>` +
+    chart(pts) + `<h2>Trefferquoten</h2><div class="grid">
+    ${m(`Tipp 1X2 · ${n1}`, pct(h1))}
+    ${m(`Resultat · ${n2}`, pct(h2))}
+    ${m(`Over/Under · ${n3}`, pct(h3))}
+    ${m(`Bet of the day · ${n4}`, pct(h4))}
+  </div><div class="note">Fake-Geld. Die Quoten stammen aus dem Modell abzüglich Marge und sagen daher nichts über echte Gewinnchancen gegen Buchmacher aus.</div>`;
+}
+
+function chart(pts) {
+  if (pts.length < 2) return '<div class="card empty">📈 Der Kontoverlauf erscheint nach den ersten abgerechneten Wetten.</div>';
+  const W = 600, H = 220, pl = 44, pr = 10, pt = 14, pb = 24;
+  const vals = pts.map(p => p[1]);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if (hi - lo < 1) { lo -= 5; hi += 5; }
+  const pad = (hi - lo) * 0.1; lo -= pad; hi += pad;
+  const x = i => pl + (W - pl - pr) * (i / (pts.length - 1));
+  const y = v => pt + (H - pt - pb) * (1 - (v - lo) / (hi - lo));
+  const path = pts.map((p, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(p[1]).toFixed(1)).join(" ");
+  const area = path + ` L${x(pts.length - 1).toFixed(1)} ${H - pb} L${pl} ${H - pb} Z`;
+  const base = y(D.start_balance);
+  const last = pts[pts.length - 1][1];
+  const col = last >= D.start_balance ? "var(--pos)" : "var(--neg)";
+  return `<div class="card"><div class="kicker" style="margin-bottom:6px">Kontoverlauf</div><svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Kontoverlauf">
+    <defs><linearGradient id="ga" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${col}" stop-opacity=".25"/><stop offset="1" stop-color="${col}" stop-opacity="0"/></linearGradient></defs>
+    <line x1="${pl}" x2="${W - pr}" y1="${base}" y2="${base}" stroke="var(--line)" stroke-width="1.5" stroke-dasharray="4 4"/>
+    <text x="${pl - 6}" y="${y(hi - pad) + 4}" text-anchor="end">${(hi - pad).toFixed(0)}</text>
+    <text x="${pl - 6}" y="${y(lo + pad) + 4}" text-anchor="end">${(lo + pad).toFixed(0)}</text>
+    <text x="${pl}" y="${H - 6}">${esc(pts[1][0].slice(5).split("-").reverse().join("."))}</text>
+    <text x="${W - pr}" y="${H - 6}" text-anchor="end">${esc(pts[pts.length - 1][0].slice(5).split("-").reverse().join("."))}</text>
+    <path d="${area}" fill="url(#ga)"/>
+    <path d="${path}" fill="none" stroke="${col}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${x(pts.length - 1)}" cy="${y(last)}" r="5" fill="${col}" stroke="var(--card)" stroke-width="2"/>
+  </svg></div>`;
+}
+
+// ---------- Wetten ----------
+function wetten() {
+  const kinds = ["ALL", "1X2", "SCORE", "OU", "BOTD"];
+  const seg = '<div class="seg">' + kinds.map(k => `<button data-kind="${k}" class="${state.kind === k ? "on" : ""}">${k === "ALL" ? "Alle" : KIND[k]}</button>`).join("") + "</div>";
+  const rows = D.bets.filter(r => inLeague(r) && (state.kind === "ALL" || r.kind === state.kind));
+  if (!rows.length) return seg + '<div class="card empty">Noch keine Wetten.</div>';
+  const right = r => (r.status === "OPEN" ? "" : `<b class="${cls(r.profit)} num">${chf(r.profit || 0)}</b><br>`) + badge(r.status);
+  return seg + rows.map(r => {
+    if (r.legs) return `<div class="card star"><div class="bet"><div class="l"><div class="kicker">⭐ Bet of the day</div>
+        <div class="t">Kombi @${r.odds.toFixed(2)}</div><div class="s">${dt(r.utc)} · Einsatz ${r.stake.toFixed(2)} CHF</div></div>
+        <div class="r">${right(r)}</div></div>${legList(r.legs)}</div>`;
+    const fin = r.hg != null ? ` · Endstand <b>${r.hg}:${r.ag}</b>` : "";
+    return `<div class="card bet"><div class="l"><div class="t">${esc(r.home)} – ${esc(r.away)}</div>
+      <div class="s">${dt(r.utc)} · ${esc(lname(r.league))}</div>
+      <div class="s">${KIND[r.kind]} <b>${esc(r.pick)}</b> @${r.odds.toFixed(2)} · ${r.stake.toFixed(2)} CHF${fin}</div></div>
+      <div class="r">${right(r)}</div></div>`;
+  }).join("") + `<div class="note">Angezeigt werden die letzten ${D.bets.length} Wetten.</div>`;
+}
+
+function tabelle() {
+  const code = oneLeague();
+  if ((D.no_table || []).includes(code)) return '<div class="card empty">Für diese Liga gibt es keine Tabelle (die Gruppen sind in den Daten nicht enthalten).</div>';
+  const t = D.tables[code] || [];
+  if (!t.length) return '<div class="card empty">Noch keine beendeten Spiele für diese Liga.</div>';
+  return `<h2>${esc(lname(code))}</h2><div class="card scroll"><table><thead><tr><th>#</th><th>Team</th><th>Sp</th><th>S</th><th>U</th><th>N</th><th>Tore</th><th>TD</th><th>Pkt</th></tr></thead><tbody>` +
+    t.map((r, i) => `<tr><td>${i + 1}</td><td><b>${esc(r.team)}</b></td><td>${r.sp}</td><td>${r.s}</td><td>${r.u}</td><td>${r.n}</td><td>${r.gf}:${r.ga}</td><td>${r.td > 0 ? "+" : ""}${r.td}</td><td><b>${r.pkt}</b></td></tr>`).join("") + "</tbody></table></div>";
+}
+
+function modell() {
+  const code = oneLeague();
+  const t = D.strength[code] || [];
+  if (!t.length) return '<div class="card empty">Noch zu wenig Daten für das Modell.</div>';
+  const mx = Math.max(...t.map(r => r.total));
+  return `<h2>${esc(lname(code))} · Teamstärken</h2><div class="card scroll"><table><thead><tr><th>#</th><th>Team</th><th>Angriff</th><th>Abwehr</th><th>Gesamt</th></tr></thead><tbody>` +
+    t.map((r, i) => `<tr><td>${i + 1}</td><td><b>${esc(r.team)}</b><div class="bar" style="height:4px;margin-top:4px;max-width:160px"><i class="b1" style="flex:${r.total / mx}"></i><i style="flex:${1 - r.total / mx}"></i></div></td><td>${r.att.toFixed(2)}</td><td>${r.dfn.toFixed(2)}</td><td><b>${r.total.toFixed(2)}</b></td></tr>`).join("") +
+    '</tbody></table></div><div class="note">1.00 = Ligadurchschnitt. Höherer Angriff und niedrigere Abwehr sind besser. Gesamt = Angriff / Abwehr.</div>';
+}
+
+const VIEWS = {tips, multi, konto, wetten, tabelle, modell};
+function render() {
+  $("#tabs").innerHTML = TABS.map(t => `<button data-tab="${t[0]}" class="${state.tab === t[0] ? "on" : ""}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICON[t[0]]}</svg><span>${t[1]}</span></button>`).join("");
+  $("#view").innerHTML = VIEWS[state.tab]();
+  $("#lg").style.visibility = state.tab === "multi" ? "hidden" : "visible";
+}
+$("#lg").innerHTML = '<option value="ALL">Alle Ligen</option>' + Object.keys(D.leagues).map(c => `<option value="${esc(c)}">${esc(D.leagues[c])}</option>`).join("");
+$("#lg").value = state.league;
+$("#lg").addEventListener("change", e => { state.league = e.target.value; set("league", state.league); render(); });
+$("#tabs").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; state.tab = b.dataset.tab; history.replaceState(null, "", "#" + state.tab); render(); window.scrollTo(0, 0); });
+$("#view").addEventListener("click", e => {
+  if (e.target.closest("#m-go")) return startMulti();
+  if (e.target.closest("#m-token")) { askToken(); return; }
+  const o = e.target.closest("button[data-only]");
+  if (o) { state.only = o.dataset.only === "1"; set("only", state.only ? "1" : "0"); render(); return; }
+  const b = e.target.closest("button[data-kind]"); if (!b) return; state.kind = b.dataset.kind; render(); });
+$("#stand").textContent = "Stand " + new Date(D.generated).toLocaleString("de-CH", {timeZone: "Europe/Zurich", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"}) + " · Fake-Geld";
+render();
+setTimeout(() => location.reload(), 10 * 60 * 1000);
+</script>
+</body>
+</html>
