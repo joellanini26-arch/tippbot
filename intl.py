@@ -232,8 +232,12 @@ def online_results(con, now=None):
                         (e["hg"], e["ag"], mid))
             n_done += 1
     con.commit()
+    missing = len(open_games) - n_done - n_void
     print(f"Nations League (TheSportsDB): {n_done} Resultate eingetragen, {n_void} ungueltig, "
-          f"{len(open_games) - n_done - n_void} noch ohne Resultat")
+          f"{missing} noch ohne Resultat ({len(events)} Spiele geliefert)")
+    if missing:   # zur Kontrolle: was geliefert wurde, aber nicht passte
+        for e in events[:30]:
+            print(f"  geliefert: {e['home']} - {e['away']} {e['hg']}:{e['ag']} [{e['status']}] {e['league']}")
 
 
 def bot_parse(s):
