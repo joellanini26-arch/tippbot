@@ -14,7 +14,10 @@ import csv
 import hashlib
 import io
 import os
+import re
+import unicodedata
 from datetime import datetime, timedelta, timezone
+from difflib import SequenceMatcher
 
 import requests
 
@@ -82,7 +85,7 @@ def _fetch_dataset(con):
     if not rows:
         print("Nations League: keine Daten im Datensatz gefunden")
         return
-    # Ein Resultat, das schon da ist (z.B. von ESPN), nicht durch "noch offen" ueberschreiben
+    # Ein Resultat, das schon da ist (z.B. von TheSportsDB), nicht durch "noch offen" ueberschreiben
     finished = {r[0] for r in con.execute("SELECT id FROM matches WHERE status='FINISHED'")}
     rows = [r for r in rows if not (r[4] != "FINISHED" and r[0] in finished)]
     con.executemany(
@@ -155,81 +158,90 @@ def reconcile(con):
         con.commit()
 
 
-# ---------- Schnelle Resultate von ESPN ----------
+# ---------- Schnelle Resultate von TheSportsDB ----------
 # Der offene Datensatz wird von Hand und oft erst Tage spaeter nachgefuehrt. Damit Wetten auf
-# Nations-League-Spiele noch am selben Abend abgerechnet werden, holt der Bot die Resultate
-# zusaetzlich von ESPN (oeffentliche Schnittstelle, ohne Schluessel).
-ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/uefa.nations/scoreboard"
-ESPN_FINAL_90 = {"STATUS_FULL_TIME", "STATUS_FINAL"}            # nach 90 Minuten entschieden
-ESPN_VOID = {"STATUS_FINAL_AET", "STATUS_FINAL_PEN", "STATUS_END_OF_EXTRATIME", "STATUS_FINAL_ET",
-             "STATUS_SHOOTOUT", "STATUS_POSTPONED", "STATUS_CANCELED", "STATUS_ABANDONED",
-             "STATUS_FORFEIT"}                                  # Verlaengerung/Abbruch: Wette zaehlt nicht
-ESPN_DAYS_BACK = 7
+# Nations-League-Spiele kurz nach Spielende abgerechnet werden, holt der Bot die Resultate zusaetzlich
+# von TheSportsDB (offizielle Gratis-Schnittstelle, oeffentlicher Schluessel "123", 30 Abfragen/Min.).
+SPORTSDB_URL = "https://www.thesportsdb.com/api/v1/json/{key}/eventsday.php"
+SPORTSDB_FINAL = {"match finished", "ft", "finished"}            # nach 90 Minuten entschieden
+SPORTSDB_VOID = {"aet", "pen", "after extra time", "after penalties", "postponed", "match postponed",
+                 "cancelled", "canceled", "match cancelled", "abandoned", "match abandoned"}
+RESULT_DAYS_BACK = 7
 
 
-def _espn_day(day):
+def _norm(name):
+    name = _name(name)
+    name = unicodedata.normalize("NFD", name).encode("ascii", "ignore").decode().lower()
+    return " ".join(w for w in re.sub(r"[^a-z0-9]+", " ", name).split() if w not in ("fc", "the"))
+
+
+def _same(a, b):
+    a, b = _norm(a), _norm(b)
+    return a == b or SequenceMatcher(None, a, b).ratio() >= 0.85
+
+
+def _sportsdb_day(day):
+    key = os.environ.get("SPORTSDB_KEY") or "123"
     try:
-        r = requests.get(ESPN_URL, params={"dates": day.strftime("%Y%m%d"), "limit": 200}, timeout=30,
-                         headers={"User-Agent": "Mozilla/5.0 (compatible; tippbot)"})
+        r = requests.get(SPORTSDB_URL.format(key=key), params={"d": day.isoformat(), "s": "Soccer"}, timeout=30)
         if r.status_code != 200:
-            print(f"ESPN {day}: Status {r.status_code}")
+            print(f"TheSportsDB {day}: Status {r.status_code}")
             return []
-        events = r.json().get("events", [])
+        events = (r.json() or {}).get("events") or []
     except (requests.RequestException, ValueError) as e:
-        print(f"ESPN {day}: Fehler ({type(e).__name__})")
+        print(f"TheSportsDB {day}: Fehler ({type(e).__name__})")
         return []
     out = []
     for ev in events:
-        try:
-            comp = ev["competitions"][0]
-            t = {c["homeAway"]: c for c in comp["competitors"]}
-            home = _name(t["home"]["team"].get("displayName"))
-            away = _name(t["away"]["team"].get("displayName"))
-            hg, ag = t["home"].get("score"), t["away"].get("score")
-            hg = int(float(hg)) if hg not in (None, "") else None
-            ag = int(float(ag)) if ag not in (None, "") else None
-        except (KeyError, IndexError, TypeError, ValueError):
-            continue
-        st = ev.get("status", {}).get("type", {})
-        out.append({"home": home, "away": away, "hg": hg, "ag": ag,
-                    "status": st.get("name", ""), "completed": bool(st.get("completed"))})
+        def score(v):
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return None
+        out.append({"home": ev.get("strHomeTeam") or "", "away": ev.get("strAwayTeam") or "",
+                    "league": ev.get("strLeague") or "", "hg": score(ev.get("intHomeScore")),
+                    "ag": score(ev.get("intAwayScore")), "status": (ev.get("strStatus") or "").strip().lower()})
     return out
 
 
-def espn_results(con, now=None):
-    """Traegt Resultate von ESPN fuer Nations-League-Spiele ein, die schon angepfiffen sind."""
+def online_results(con, now=None):
+    """Traegt Resultate fuer Nations-League-Spiele ein, die schon angepfiffen sind."""
     now = now or datetime.now(timezone.utc)
-    since = (now - timedelta(days=ESPN_DAYS_BACK)).strftime("%Y-%m-%d")
+    since = (now - timedelta(days=RESULT_DAYS_BACK)).strftime("%Y-%m-%d")
     open_games = con.execute(
         "SELECT id, utc_date, home, away FROM matches WHERE league='NL' AND status IN ('TIMED','SCHEDULED') "
         "AND utc_date >= ? AND utc_date < ?", (since, now.strftime("%Y-%m-%dT%H:%M:%SZ"))).fetchall()
     if not open_games:
         return
     days = sorted({datetime.strptime(d[:10], "%Y-%m-%d").date() for _, d, _, _ in open_games})
-    results = {}
+    events = []
     for day in days:
-        for e in _espn_day(day):
-            results[(e["home"], e["away"])] = e
+        events += [e for e in _sportsdb_day(day) if "nations" in e["league"].lower() or not e["league"]]
     n_done = n_void = 0
     for mid, d, home, away in open_games:
-        e = results.get((home, away))
+        e = next((x for x in events if _same(home, x["home"]) and _same(away, x["away"])), None)
         if not e:
             continue
-        if e["status"] in ESPN_FINAL_90 and e["completed"] and e["hg"] is not None and e["ag"] is not None:
+        if e["status"] in SPORTSDB_VOID:
+            con.execute("UPDATE matches SET status='CANCELLED' WHERE id=?", (mid,))
+            n_void += 1
+        elif e["hg"] is not None and e["ag"] is not None and (
+                e["status"] in SPORTSDB_FINAL
+                or (not e["status"] and now - bot_parse(d) > timedelta(hours=3))):
             con.execute("UPDATE matches SET status='FINISHED', home_goals=?, away_goals=? WHERE id=?",
                         (e["hg"], e["ag"], mid))
             n_done += 1
-        elif e["status"] in ESPN_VOID:
-            con.execute("UPDATE matches SET status='CANCELLED' WHERE id=?", (mid,))
-            n_void += 1
     con.commit()
-    missing = len(open_games) - n_done - n_void
-    print(f"Nations League (ESPN): {n_done} Resultate eingetragen, {n_void} ungueltig, "
-          f"{missing} noch ohne Resultat")
+    print(f"Nations League (TheSportsDB): {n_done} Resultate eingetragen, {n_void} ungueltig, "
+          f"{len(open_games) - n_done - n_void} noch ohne Resultat")
+
+
+def bot_parse(s):
+    return datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
 def fetch(con):
     _fetch_dataset(con)          # Resultate (und evtl. Spielplan) aus dem offenen Datensatz
     load_manual_fixtures(con)    # Spielplan mit Anstosszeiten
     reconcile(con)
-    espn_results(con)            # schnelle Resultate fuer bereits gespielte Spiele
+    online_results(con)          # schnelle Resultate fuer bereits gespielte Spiele
