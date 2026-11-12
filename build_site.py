@@ -192,6 +192,7 @@ def main():
     duel_data = duel.duel_json(con)
     data["duel"] = duel_data["challenge"]
     data["duel_partner"] = duel.PARTNER_URL
+    data["espn_names"] = duel.ESPN_NAMES          # fuer die Live-Resultate im Browser
     con.close()
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
     html = TEMPLATE.replace("__DATA__", payload)

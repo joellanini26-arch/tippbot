@@ -137,6 +137,17 @@ h2{font-size:13px;font-weight:700;color:var(--mute);text-transform:uppercase;let
 .leg .ic{flex:none;width:20px;text-align:center}
 .leg small{color:var(--mute)}
 .star{border:1px solid transparent;background:linear-gradient(var(--card),var(--card)) padding-box,linear-gradient(135deg,var(--acc),var(--acc2),#db2777) border-box}
+.live{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:800;color:#dc2626;white-space:nowrap;font-variant-numeric:tabular-nums}
+.live::before{content:"";width:7px;height:7px;border-radius:50%;background:#dc2626;animation:pulse 1.4s infinite}
+.live.end{color:var(--fg)}.live.end::before{display:none}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+.score{font-size:22px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.bl{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line)}
+.bl:first-of-type{border-top:0}
+.bl .l{min-width:0;font-size:14px}.bl .l small{color:var(--mute)}
+.bl .r{text-align:right;white-space:nowrap;display:flex;flex-direction:column;align-items:flex-end;gap:3px}
+.bl .r small{color:var(--mute);font-size:11.5px}
+.livebox{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:10px 0 4px;padding:10px 12px;border-radius:12px;background:var(--card2)}
 .duo{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin:20px 0 4px;padding:12px 16px;background:var(--card);border:1px solid var(--line);border-radius:16px;font-size:13px;box-shadow:var(--shadow)}
 .duo b{font-weight:800}
 .duo a{margin-left:auto;font-weight:700;text-decoration:none}
@@ -198,7 +209,111 @@ const inLeague = r => state.league === "ALL" || r.league === state.league;
 const oneLeague = () => state.league !== "ALL" ? state.league : Object.keys(D.leagues)[0];
 const m = (l, v, c) => `<div class="metric"><span>${l}</span><b class="${c || ""}">${v}</b></div>`;
 const LEGMARK = {WON: "✅", LOST: "❌", VOID: "↩️", OPEN: "⏳"};
-const legList = legs => `<div class="legs">` + legs.map(l => `<div class="leg"><span class="ic">${LEGMARK[l.state]}</span><div>${esc(l.home)} – ${esc(l.away)}: <b>${esc(pickLabel(l.pick))}</b><br><small>${l.utc ? dt(l.utc) + " · " : ""}@${l.odds.toFixed(2)}${l.prob != null ? " · " + pct(l.prob) : ""}${l.hg != null ? " · Endstand " + l.hg + ":" + l.ag : ""}</small></div></div>`).join("") + "</div>";
+const legList = legs => `<div class="legs">` + legs.map(l => {
+  const ev = l.state === "OPEN" ? liveOf(l.league, l.utc, l.home, l.away) : null;
+  const ok = ev ? liveCheck(l.pick, ev) : null;
+  const ic = ok === true ? "🟢" : ok === false ? "🔴" : LEGMARK[l.state];
+  return `<div class="leg"><span class="ic">${ic}</span><div>${esc(l.home)} – ${esc(l.away)}: <b>${esc(pickLabel(l.pick))}</b> ${liveTag(ev)}<br><small>${l.utc ? dt(l.utc) + " · " : ""}@${l.odds.toFixed(2)}${l.prob != null ? " · " + pct(l.prob) : ""}${l.hg != null ? " · Endstand " + l.hg + ":" + l.ag : ""}</small></div></div>`;
+}).join("") + "</div>";
+const comboLive = (legs, stake, odds, open) => {
+  if (!open) return "";
+  const st = legs.map(l => l.state === "OPEN" ? (() => { const ev = liveOf(l.league, l.utc, l.home, l.away); return ev ? liveCheck(l.pick, ev) : null; })() : l.state === "LOST" ? false : true);
+  if (!legs.some(l => l.state === "OPEN" && liveOf(l.league, l.utc, l.home, l.away)) && !st.includes(false)) return `<div class="livebox"><small>Auszahlung bei Treffer</small><b class="num">${fr(stake * odds)} CHF</b></div>`;
+  const tag = st.includes(false) ? stateTag(false) : st.every(x => x === true) ? stateTag(true) : '<span class="badge open">⏳ läuft, noch offen</span>';
+  return `<div class="livebox">${tag}<span class="num"><small>bei Treffer</small> <b>${fr(stake * odds)} CHF</b></span></div>`;
+};
+
+// ---------- Live-Resultate (ESPN, im Browser) ----------
+const ESPN_SLUG = {PL: "eng.1", PD: "esp.1", BL1: "ger.1", SA: "ita.1", FL1: "fra.1", NL: "uefa.nations",
+  ELC: "eng.2", DED: "ned.1", PPL: "por.1"};
+const LIVE = {events: {}, ok: null, at: null};
+const STOP = new Set(["fc","afc","cf","sc","ac","as","ss","ssc","us","sv","vfb","vfl","tsg","rc","ogc","club","de","cd","ud","sd","rcd","the","calcio","and","1","04","05","07","1907","1899","1909"]);
+const toks = n => new Set(String((D.espn_names || {})[n] || n).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+  .replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").split(" ").filter(w => w && !STOP.has(w)));
+function nameSim(a, b) {
+  const A = toks(a), B = toks(b);
+  if (!A.size || !B.size) return 0;
+  let common = 0; A.forEach(w => { if (B.has(w)) common++; });
+  if (!common) { const ja = [...A].join(""), jb = [...B].join(""); return ja.includes(jb) || jb.includes(ja) ? 0.8 : 0; }
+  return common / Math.min(A.size, B.size);
+}
+const CODE_BY_NAME = Object.fromEntries(Object.entries(D.leagues).map(([c, n]) => [n, c]));
+function liveOf(league, utc, home, away) {
+  const code = ESPN_SLUG[league] ? league : CODE_BY_NAME[league];
+  const evs = LIVE.events[code];
+  if (!evs || !utc) return null;
+  const t = Date.parse(utc);
+  let best = null, bs = 0;
+  for (const e of evs) {
+    if (Math.abs(e.t - t) > 3 * 3600e3) continue;
+    const sc = nameSim(home, e.home) + nameSim(away, e.away);
+    if (sc > bs) { bs = sc; best = e; }
+  }
+  return bs >= 1 && best && best.state !== "pre" ? best : null;
+}
+function liveCheck(pick, ev) {         // geht die Wette beim aktuellen Spielstand auf?
+  const h = ev.hg, a = ev.ag;
+  if (h == null || a == null) return null;
+  const res = h > a ? "1" : h === a ? "X" : "2";
+  let m;
+  if (/^(1|X|2|1X|X2|12)$/.test(pick)) return pick.includes(res);
+  if ((m = pick.match(/^(?:Over |O)(\d+(?:\.\d+)?)$/))) return h + a > +m[1];
+  if ((m = pick.match(/^(?:Under |U)(\d+(?:\.\d+)?)$/))) return h + a < +m[1];
+  if (pick === "BTTS_YES") return h > 0 && a > 0;
+  if (pick === "BTTS_NO") return !(h > 0 && a > 0);
+  if ((m = pick.match(/^(?:CS_)?(\d+)[:\-](\d+)$/))) return h === +m[1] && a === +m[2];
+  return null;
+}
+const liveTag = ev => !ev ? "" : ev.state === "in"
+  ? `<span class="live">${esc(ev.clock)} · ${ev.hg}:${ev.ag}</span>`
+  : `<span class="live end">${esc(ev.detail || "Ende")} · ${ev.hg}:${ev.ag}</span>`;
+const stateTag = (ok, fin) => ok === true ? `<span class="badge won">✅ ${fin ? "aufgegangen" : "geht auf"}</span>`
+  : ok === false ? `<span class="badge lost">❌ ${fin ? "nicht aufgegangen" : "geht nicht auf"}</span>` : "";
+
+function openLegs() {                  // alle offenen Spiele, fuer die Live-Daten gebraucht werden
+  const out = [];
+  D.bets.forEach(b => { if (b.status === "OPEN") (b.legs || [b]).forEach(l => out.push([l.league, l.utc])); });
+  if (D.botd) D.botd.legs.forEach(l => out.push([l.league, l.utc]));
+  (D.multi && D.multi.runs || []).forEach(r => r.bets.forEach(b => b.status === "OPEN" && b.legs.forEach(l => out.push([l.league, l.utc]))));
+  (D.duel && D.duel.attempts || []).forEach(a => a.bets.forEach(b => b.status === "open" && b.legs.forEach(l => out.push([CODE_BY_NAME[l.competition], l.kickoff]))));
+  const now = Date.now();
+  return out.filter(([c, u]) => c && u && ESPN_SLUG[c] && !u.endsWith("T00:00:00Z") && Date.parse(u) < now + 10 * 60e3 && Date.parse(u) > now - 18 * 3600e3);
+}
+async function loadLive() {
+  const want = {};
+  openLegs().forEach(([c, u]) => { (want[c] = want[c] || new Set()).add(u.slice(0, 10).replace(/-/g, "")); });
+  const jobs = [];
+  for (const [c, days] of Object.entries(want)) for (const d of days) jobs.push([c, d]);
+  if (!jobs.length) return false;
+  const events = {};
+  let ok = 0;
+  await Promise.all(jobs.map(async ([c, d]) => {
+    try {
+      const r = await fetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/${ESPN_SLUG[c]}/scoreboard?dates=${d}`, {cache: "no-store"});
+      if (!r.ok) return;
+      const j = await r.json(); ok++;
+      (j.events || []).forEach(ev => {
+        const comp = (ev.competitions || [])[0]; if (!comp) return;
+        const t = {}; (comp.competitors || []).forEach(x => t[x.homeAway] = x);
+        if (!t.home || !t.away) return;
+        const st = (ev.status || {}).type || {};
+        const num = v => v === undefined || v === null || v === "" ? null : Math.round(+v);
+        (events[c] = events[c] || []).push({t: Date.parse(ev.date), home: t.home.team.displayName, away: t.away.team.displayName,
+          hg: num(t.home.score), ag: num(t.away.score), state: st.state || "pre",
+          clock: st.shortDetail || (ev.status || {}).displayClock || "", detail: st.shortDetail || ""});
+      });
+    } catch (e) {}
+  }));
+  LIVE.events = events; LIVE.ok = ok > 0; LIVE.at = Date.now();
+  return true;
+}
+async function refreshLive() {
+  if (document.visibilityState === "hidden") return;
+  const had = await loadLive();
+  if (had && ["wetten", "tips", "multi", "duell"].includes(state.tab)) {
+    const y = window.scrollY; $("#view").innerHTML = VIEWS[state.tab](); window.scrollTo(0, y);
+  }
+}
 
 function account() {
   const total = D.daily.reduce((a, r) => a + r.profit, 0);
@@ -212,7 +327,7 @@ function botdCard() {
   const res = b.status === "OPEN" ? badge("OPEN") : `<b class="${cls(b.profit)}">${chf(b.profit || 0)} CHF</b>`;
   return `<div class="card star">
     <div class="meta"><span class="kicker">⭐ Bet of the day</span><span>${dt(b.utc)}</span></div>
-    ${legList(b.legs)}
+    ${legList(b.legs)}${comboLive(b.legs, b.stake, b.odds, b.status === "OPEN")}
     <div class="chips" style="margin-top:12px"><span class="chip tip">Quote <b>@${b.odds.toFixed(2)}</b></span>
       <span class="chip">Modell <b>${pct(b.prob)}</b></span>
       <span class="chip">Einsatz <b>${b.stake.toFixed(0)} CHF</b></span>
@@ -261,7 +376,7 @@ function multiBetCard(b, i) {
   return `<div class="card${open ? " star" : ""}">
     <div class="bet"><div class="l"><div class="kicker">Stufe ${i + 1}</div><div class="t">Kombi @${b.odds.toFixed(2)} · ${pct(b.prob)}</div>
     <div class="s">Einsatz ${fr(b.stake)} Fr.${after}</div></div><div class="r">${res}</div></div>
-    ${legList(b.legs)}${saved}</div>`;
+    ${legList(b.legs)}${comboLive(b.legs, b.stake, b.odds, open)}${saved}</div>`;
 }
 
 function multi() {
@@ -416,16 +531,45 @@ function wetten() {
   const rows = D.bets.filter(r => inLeague(r) && (state.kind === "ALL" || r.kind === state.kind));
   if (!rows.length) return seg + '<div class="card empty">Noch keine Wetten.</div>';
   const right = r => (r.status === "OPEN" ? "" : `<b class="${cls(r.profit)} num">${chf(r.profit || 0)}</b><br>`) + badge(r.status);
-  return seg + rows.map(r => {
-    if (r.legs) return `<div class="card star"><div class="bet"><div class="l"><div class="kicker">⭐ Bet of the day</div>
-        <div class="t">Kombi @${r.odds.toFixed(2)}</div><div class="s">${dt(r.utc)} · Einsatz ${r.stake.toFixed(2)} CHF</div></div>
-        <div class="r">${right(r)}</div></div>${legList(r.legs)}</div>`;
-    const fin = r.hg != null ? ` · Endstand <b>${r.hg}:${r.ag}</b>` : "";
-    return `<div class="card bet"><div class="l"><div class="t">${esc(r.home)} – ${esc(r.away)}</div>
-      <div class="s">${dt(r.utc)} · ${esc(lname(r.league))}</div>
-      <div class="s">${KIND[r.kind]} <b>${esc(r.pick)}</b> @${r.odds.toFixed(2)} · ${r.stake.toFixed(2)} CHF${fin}</div></div>
-      <div class="r">${right(r)}</div></div>`;
-  }).join("") + `<div class="note">Angezeigt werden die letzten ${D.bets.length} Wetten.</div>`;
+  // Einzelwetten pro Spiel zusammenfassen
+  const cards = [], byMatch = {};
+  rows.forEach(r => {
+    if (r.legs) { cards.push(r); return; }
+    const k = r.utc + "|" + r.home + "|" + r.away;
+    if (!byMatch[k]) { byMatch[k] = {match: true, league: r.league, utc: r.utc, home: r.home, away: r.away, hg: r.hg, ag: r.ag, bets: []}; cards.push(byMatch[k]); }
+    byMatch[k].bets.push(r);
+  });
+  // Reihenfolge: laufende Spiele zuerst, dann kommende nach Anpfiff, dann abgerechnete (neueste zuerst)
+  const isOpen = c => c.match ? c.bets.some(b => b.status === "OPEN") : c.status === "OPEN";
+  const isLive = c => isOpen(c) && (c.match ? !!liveOf(c.league, c.utc, c.home, c.away) : c.legs.some(l => l.state === "OPEN" && liveOf(l.league, l.utc, l.home, l.away)));
+  const rank = c => isLive(c) ? 0 : isOpen(c) ? 1 : 2;
+  cards.sort((x, y) => rank(x) - rank(y) || (rank(x) === 1 ? x.utc.localeCompare(y.utc) : y.utc.localeCompare(x.utc)));
+  // Live-Zusammenfassung
+  let nLive = 0, nOk = 0, nBad = 0, pot = 0;
+  cards.forEach(c => { if (!c.match) return; const ev = liveOf(c.league, c.utc, c.home, c.away); if (!ev) return;
+    c.bets.forEach(b => { if (b.status !== "OPEN") return; nLive++; const ok = liveCheck(b.pick, ev); if (ok) { nOk++; pot += b.stake * (b.odds - 1); } else if (ok === false) nBad++; }); });
+  let top = "";
+  if (nLive) top = `<div class="card hero"><div class="lbl">🔴 Live</div><div class="big num">${chf(pot)} CHF</div>
+    <div class="row2"><span>Gewinn, wenn es so bleibt</span><span><b>${nOk}</b> gehen auf</span><span><b>${nBad}</b> gehen nicht auf</span></div></div>`;
+  else if (LIVE.ok === false) top = '<div class="note">Live-Resultate sind gerade nicht erreichbar.</div>';
+  return seg + top + cards.map(c => {
+    if (!c.match) return `<div class="card star"><div class="bet"><div class="l"><div class="kicker">⭐ Bet of the day</div>
+        <div class="t">Kombi @${c.odds.toFixed(2)}</div><div class="s">${dt(c.utc)} · Einsatz ${c.stake.toFixed(2)} CHF</div></div>
+        <div class="r">${right(c)}</div></div>${legList(c.legs)}${comboLive(c.legs, c.stake, c.odds, c.status === "OPEN")}</div>`;
+    const ev = c.bets.some(b => b.status === "OPEN") ? liveOf(c.league, c.utc, c.home, c.away) : null;
+    const head = ev ? `<span class="score">${ev.hg}:${ev.ag}</span>` : c.hg != null ? `<span class="score">${c.hg}:${c.ag}</span>` : "";
+    const lines = c.bets.map(b => {
+      let r;
+      if (b.status !== "OPEN") r = `<b class="${cls(b.profit)} num">${chf(b.profit || 0)} CHF</b>${badge(b.status)}`;
+      else {
+        const ok = ev ? liveCheck(b.pick, ev) : null;
+        r = (ev ? stateTag(ok, ev.state === "post") : badge("OPEN")) + `<small>bei Treffer <b class="num">+${(b.stake * (b.odds - 1)).toFixed(2)} CHF</b></small>`;
+      }
+      return `<div class="bl"><div class="l">${KIND[b.kind]} <b>${esc(b.kind === "OU" ? pickLabel(b.pick) : b.pick)}</b><br><small>@${b.odds.toFixed(2)} · Einsatz ${b.stake.toFixed(2)} CHF</small></div><div class="r">${r}</div></div>`;
+    }).join("");
+    return `<div class="card"><div class="meta"><span class="lg"><i class="dot"></i>${esc(lname(c.league))}</span><span>${ev ? liveTag(ev) : dt(c.utc)}</span></div>
+      <div class="bet" style="margin:8px 0 6px"><div class="t">${esc(c.home)} – ${esc(c.away)}</div>${head}</div>${lines}</div>`;
+  }).join("") + `<div class="note">Angezeigt werden die letzten ${D.bets.length} Wetten. Live-Resultate von ESPN, alle 60 Sekunden aktualisiert. „Geht auf“ gilt für den aktuellen Spielstand; verbucht wird die Wette beim nächsten Bot-Lauf.</div>`;
 }
 
 function tabelle() {
@@ -455,10 +599,13 @@ const DUEL_ICON = {open: "⏳", won: "✅", lost: "❌", void: "↩️"};
 function duelBet(b, i) {
   const res = b.status === "open" ? badge("OPEN") : b.status === "void" ? badge("VOID")
     : `<b class="${b.status === "won" ? "pos" : "neg"} num">${b.status === "won" ? fr(b.payout) + " CHF" : "−" + fr(b.stake)}</b>`;
-  const legs = b.legs.map(l => `<div class="leg"><span class="ic">${DUEL_ICON[l.status]}</span><div>${esc(l.home)} – ${esc(l.away)}: <b>${esc(l.label)}</b><br><small>${dt(l.kickoff)} · ${esc(l.competition)} · @${l.odds.toFixed(2)}${l.score ? " · Endstand " + esc(l.score) : ""}</small></div></div>`).join("");
+  const lv = b.legs.map(l => { const ev = l.status === "open" ? liveOf(l.competition, l.kickoff, l.home, l.away) : null; return {ev, ok: ev ? liveCheck(l.pick, ev) : l.status === "lost" ? false : l.status === "open" ? null : true}; });
+  const legs = b.legs.map((l, j) => `<div class="leg"><span class="ic">${lv[j].ev ? (lv[j].ok ? "🟢" : "🔴") : DUEL_ICON[l.status]}</span><div>${esc(l.home)} – ${esc(l.away)}: <b>${esc(l.label)}</b> ${liveTag(lv[j].ev)}<br><small>${dt(l.kickoff)} · ${esc(l.competition)} · @${l.odds.toFixed(2)}${l.score ? " · Endstand " + esc(l.score) : ""}</small></div></div>`).join("");
+  const anyLive = lv.some(x => x.ev);
+  const box = b.status !== "open" ? "" : `<div class="livebox">${anyLive ? (lv.some(x => x.ok === false) ? stateTag(false) : lv.every(x => x.ok === true) ? stateTag(true) : '<span class="badge open">⏳ läuft, noch offen</span>') : "<small>Auszahlung bei Treffer</small>"}<b class="num">${fr(b.stake * b.odds)} CHF</b></div>`;
   return `<div class="card${b.status === "open" ? " star" : ""}"><div class="bet"><div class="l"><div class="kicker">Wette ${i + 1} · ${b.legs.length === 1 ? "Einzelwette" : "Kombi"}</div>
     <div class="t">Einsatz ${fr(b.stake)} CHF @${b.odds.toFixed(2)}</div><div class="s">Chance laut Modell ${pct(b.probability)} · gesetzt ${dt(b.placed)}</div></div>
-    <div class="r">${res}</div></div><div class="legs">${legs}</div></div>`;
+    <div class="r">${res}</div></div><div class="legs">${legs}</div>${box}</div>`;
 }
 
 function duell() {
@@ -543,6 +690,9 @@ $("#view").addEventListener("click", e => {
   const b = e.target.closest("button[data-kind]"); if (!b) return; state.kind = b.dataset.kind; render(); });
 $("#stand").textContent = "Stand " + new Date(D.generated).toLocaleString("de-CH", {timeZone: "Europe/Zurich", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"}) + " · Fake-Geld";
 render();
+refreshLive();
+setInterval(refreshLive, 60 * 1000);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && (!LIVE.at || Date.now() - LIVE.at > 30e3)) refreshLive(); });
 duelStatus();
 setInterval(duelStatus, 5 * 60 * 1000);
 setTimeout(() => location.reload(), 10 * 60 * 1000);
