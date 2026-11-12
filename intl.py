@@ -162,7 +162,8 @@ def reconcile(con):
 # Der offene Datensatz wird von Hand und oft erst Tage spaeter nachgefuehrt. Damit Wetten auf
 # Nations-League-Spiele kurz nach Spielende abgerechnet werden, holt der Bot die Resultate zusaetzlich
 # von TheSportsDB (offizielle Gratis-Schnittstelle, oeffentlicher Schluessel "123", 30 Abfragen/Min.).
-SPORTSDB_URL = "https://www.thesportsdb.com/api/v1/json/{key}/eventsday.php"
+SPORTSDB_URL = "https://www.thesportsdb.com/api/v1/json/{key}/{endpoint}"
+SPORTSDB_NL_ID = 4490                      # UEFA Nations League bei TheSportsDB
 SPORTSDB_FINAL = {"match finished", "ft", "finished"}            # nach 90 Minuten entschieden
 SPORTSDB_VOID = {"aet", "pen", "after extra time", "after penalties", "postponed", "match postponed",
                  "cancelled", "canceled", "match cancelled", "abandoned", "match abandoned"}
@@ -180,16 +181,17 @@ def _same(a, b):
     return a == b or SequenceMatcher(None, a, b).ratio() >= 0.85
 
 
-def _sportsdb_day(day):
+def _sportsdb(endpoint, params):
     key = os.environ.get("SPORTSDB_KEY") or "123"
     try:
-        r = requests.get(SPORTSDB_URL.format(key=key), params={"d": day.isoformat(), "s": "Soccer"}, timeout=30)
+        r = requests.get(SPORTSDB_URL.format(key=key, endpoint=endpoint), params=params, timeout=30)
         if r.status_code != 200:
-            print(f"TheSportsDB {day}: Status {r.status_code}")
+            print(f"TheSportsDB {endpoint}: Status {r.status_code}")
             return []
-        events = (r.json() or {}).get("events") or []
+        j = r.json() or {}
+        events = j.get("events") or j.get("event") or j.get("results") or []
     except (requests.RequestException, ValueError) as e:
-        print(f"TheSportsDB {day}: Fehler ({type(e).__name__})")
+        print(f"TheSportsDB {endpoint}: Fehler ({type(e).__name__})")
         return []
     out = []
     for ev in events:
@@ -204,6 +206,30 @@ def _sportsdb_day(day):
     return out
 
 
+def _sportsdb_day(day):
+    return _sportsdb("eventsday.php", {"d": day.isoformat(), "s": "Soccer"})
+
+
+def _sportsdb_last_nl():
+    return _sportsdb("eventspastleague.php", {"id": SPORTSDB_NL_ID})
+
+
+def _sportsdb_search(home, away, day):
+    found = []
+    for h, a in {(home, away), (_display(home), _display(away))}:
+        found += _sportsdb("searchevents.php", {"e": f"{h}_vs_{a}".replace(" ", "_"), "d": day.isoformat()})
+        if found:
+            break
+    return found
+
+
+DISPLAY = {"Turkey": "Türkiye", "Czech Republic": "Czechia"}
+
+
+def _display(name):
+    return DISPLAY.get(name, name)
+
+
 def online_results(con, now=None):
     """Traegt Resultate fuer Nations-League-Spiele ein, die schon angepfiffen sind."""
     now = now or datetime.now(timezone.utc)
@@ -214,12 +240,19 @@ def online_results(con, now=None):
     if not open_games:
         return
     days = sorted({datetime.strptime(d[:10], "%Y-%m-%d").date() for _, d, _, _ in open_games})
-    events = []
+    events = _sportsdb_last_nl()                          # letzte Spiele der Nations League
     for day in days:
-        events += [e for e in _sportsdb_day(day) if "nations" in e["league"].lower() or not e["league"]]
+        events += _sportsdb_day(day)
+    events = [e for e in events if "nations" in e["league"].lower() or not e["league"]]
     n_done = n_void = 0
     for mid, d, home, away in open_games:
         e = next((x for x in events if _same(home, x["home"]) and _same(away, x["away"])), None)
+        if not e:                                          # einzeln suchen
+            day = datetime.strptime(d[:10], "%Y-%m-%d").date()
+            e = next((x for x in _sportsdb_search(home, away, day)
+                      if _same(home, x["home"]) and _same(away, x["away"])), None)
+            if e:
+                events.append(e)
         if not e:
             continue
         if e["status"] in SPORTSDB_VOID:
