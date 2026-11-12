@@ -6,15 +6,19 @@ funktioniert aber auch lokal:  python build_site.py
 """
 import json
 import os
+import shutil
 import sqlite3
 import sys
 from datetime import datetime, timezone
 
 import bot
+import calib
 import multi
 import paper
 
-OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "site")
+HERE = os.path.dirname(os.path.abspath(__file__))
+OUT_DIR = os.path.join(HERE, "site")
+STATIC_DIR = os.path.join(HERE, "static")   # App-Symbole, Manifest, Service Worker
 UPCOMING_DAYS = 14
 MAX_BETS = 300
 
@@ -32,9 +36,12 @@ def build_data(con):
         "upcoming": [], "tables": {}, "strength": {},
     }
 
-    odds = {}
-    for mid, kind, o in con.execute("SELECT match_id, kind, odds FROM bets"):
+    odds, stakes = {}, {}
+    for mid, kind, o, st in con.execute("SELECT match_id, kind, odds, stake FROM bets"):
         odds.setdefault(mid, {})[kind] = o
+        stakes.setdefault(mid, {})[kind] = st
+    fac = calib.factors(con)
+    data["calib"] = {"factors": fac, "buckets": calib.buckets(con), "prior": calib.PRIOR}
 
     over_key = f"p_o{int(paper.OU_LINE * 10)}"
     for code in bot.LEAGUES:
@@ -83,7 +90,8 @@ def build_data(con):
             p = bot.predict(model, home, away)
             games = model.get("n_games", {})
             enough = min(games.get(home, 0), games.get(away, 0)) >= paper.MIN_GAMES
-            sel = [[k, pk, pr] for k, pk, pr in paper.selected_bets(p)] if enough else []
+            sel = [[k, pk, pr, pc, stakes.get(mid, {}).get(k, st)]
+                   for k, pk, pr, pc, st in paper.selected_bets(p, fac)] if enough else []
             data["upcoming"].append({
                 "sel": sel,
                 "id": mid, "league": code, "utc": d, "home": home, "away": away,
@@ -185,11 +193,13 @@ def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     with open(os.path.join(OUT_DIR, "index.html"), "w", encoding="utf-8") as f:
         f.write(html)
+    if os.path.isdir(STATIC_DIR):
+        shutil.copytree(STATIC_DIR, OUT_DIR, dirs_exist_ok=True)
     print(f"Dashboard geschrieben: {len(html) // 1024} KB, "
           f"{len(data['upcoming'])} kommende Spiele, {len(data['bets'])} Wetten")
 
 
-with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html"), encoding="utf-8") as _f:
+with open(os.path.join(HERE, "dashboard.html"), encoding="utf-8") as _f:
     TEMPLATE = _f.read()          # Vorlage des Dashboards (HTML/CSS/JS), __DATA__ wird ersetzt
 
 

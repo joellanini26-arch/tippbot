@@ -7,6 +7,9 @@
 <meta name="theme-color" content="#f5f6fa" media="(prefers-color-scheme: light)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Tippbot">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>Tippbot</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%BD%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -149,6 +152,7 @@ h2{font-size:13px;font-weight:700;color:var(--mute);text-transform:uppercase;let
 <main id="view"></main>
 <script>
 const D = __DATA__;
+const LOADED = Date.now();
 const ICON = {
   tips: '<path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z"/><path d="m12 7 3.5 2.5-1.3 4h-4.4l-1.3-4Z"/><path d="M12 3v4M15.5 9.5 20 8M14.2 13.5l2.3 4.5M9.8 13.5 7.5 18M8.5 9.5 4 8"/>',
   multi: '<path d="M4 18 10 12l4 4 6-8"/><path d="M15 8h5v5"/>',
@@ -220,7 +224,7 @@ function tips() {
   return h + rows.map(r => {
     const o = r.odds || {};
     const q = k => o[k] ? ` <small>@${o[k].toFixed(2)}</small>` : "";
-    const sel = r.sel.map(([k, pick, prob]) => `<span class="chip tip">${k === "1X2" ? "Tipp" : k === "SCORE" ? "Resultat" : ""} <b>${esc(pick)}</b> <small>${pct(prob)}</small>${q(k)}</span>`).join("");
+    const sel = r.sel.map(([k, pick, prob, pc, stake]) => `<span class="chip tip">${k === "1X2" ? "Tipp" : k === "SCORE" ? "Resultat" : ""} <b>${esc(pick)}</b> <small>${pct(pc)}</small>${q(k)}<small>· ${stake} CHF</small></span>`).join("");
     const tipBlock = r.sel.length
       ? `<div class="tiprow"><div class="h">🎯 Bot-Tipp</div><div class="chips">${sel}</div></div>`
       : `<div class="skip"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M8 12h8"/></svg>Kein Tipp: zu unsicher</div>`;
@@ -347,7 +351,26 @@ function konto() {
     ${m(`Resultat · ${n2}`, pct(h2))}
     ${m(`Over/Under · ${n3}`, pct(h3))}
     ${m(`Bet of the day · ${n4}`, pct(h4))}
-  </div><div class="note">Fake-Geld. Die Quoten stammen aus dem Modell abzüglich Marge und sagen daher nichts über echte Gewinnchancen gegen Buchmacher aus.</div>`;
+  </div>` + selfCheck() + `<div class="note">Fake-Geld. Die Quoten stammen aus dem Modell abzüglich Marge und sagen daher nichts über echte Gewinnchancen gegen Buchmacher aus.</div>`;
+}
+
+function selfCheck() {
+  const C = D.calib || {factors: {}, buckets: []};
+  const names = {"1X2": "Tipp 1X2", "OU": "Over/Under", "SCORE": "Resultat"};
+  let h = '<h2>Selbstkontrolle</h2><div class="note" style="margin-top:0">Trifft der Bot so oft, wie er selbst erwartet? Daraus berechnet er einen Korrekturfaktor, mit dem er Schwellen und Einsätze anpasst. Unter 1.00 heisst: Er war zu optimistisch und wird vorsichtiger.</div><div class="grid">';
+  for (const k of ["1X2", "OU", "SCORE"]) {
+    const f = C.factors[k] || {n: 0, factor: 1};
+    const c = f.factor > 1.005 ? "pos" : f.factor < 0.995 ? "neg" : "";
+    h += `<div class="metric"><span>${names[k]} · ${f.n} Wetten</span><b class="${c}">×${f.factor.toFixed(2)}</b>
+      <span>${f.n ? `getroffen ${pct(f.rate)} · erwartet ${pct(f.pred)}` : "noch keine Daten"}</span></div>`;
+  }
+  h += "</div>";
+  if (C.buckets.length) {
+    h += `<div class="card scroll"><table><thead><tr><th></th><th>Sicherheit</th><th>Wetten</th><th>Erwartet</th><th>Getroffen</th></tr></thead><tbody>` +
+      C.buckets.map(b => { const d = b.rate - b.pred; return `<tr><td>${names[b.kind]}</td><td>${Math.round(b.lo * 100)}–${Math.round(b.hi * 100)} %</td><td>${b.n}</td><td>${pct(b.pred)}</td><td><b class="${Math.abs(d) < 0.03 ? "" : d > 0 ? "pos" : "neg"}">${pct(b.rate)}</b></td></tr>`; }).join("") +
+      "</tbody></table></div>";
+  } else h += '<div class="card empty">Die Auswertung startet automatisch, sobald die ersten Wetten abgerechnet sind.</div>';
+  return h;
 }
 
 function chart(pts) {
@@ -434,6 +457,10 @@ $("#view").addEventListener("click", e => {
 $("#stand").textContent = "Stand " + new Date(D.generated).toLocaleString("de-CH", {timeZone: "Europe/Zurich", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"}) + " · Fake-Geld";
 render();
 setTimeout(() => location.reload(), 10 * 60 * 1000);
+if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
+document.addEventListener("visibilitychange", () => {   // App wieder geoeffnet: neuen Stand laden, falls aelter als 10 Min.
+  if (document.visibilityState === "visible" && Date.now() - new Date(D.generated) > 15 * 60 * 1000 && Date.now() - LOADED > 60 * 1000) location.reload();
+});
 </script>
 </body>
 </html>

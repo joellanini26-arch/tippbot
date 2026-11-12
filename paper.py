@@ -16,6 +16,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 import bot
+import calib
 import multi
 import notify
 
@@ -32,6 +33,7 @@ MIN_PROB_1X2 = 0.60      # 1/X/2-Tipp
 MIN_PROB_OU = 0.65       # Over/Under
 MIN_PROB_SCORE = 0.15    # exaktes Resultat (ist immer unsicher, daher tiefe Schwelle)
 MIN_GAMES = 8            # beide Teams brauchen so viele Spiele in den Daten
+MAX_STAKE_FACTOR = 3.0   # Einsatz nach Sicherheit: knapp ueber der Schwelle 1x, sehr sicher bis 3x
 
 # Bet of the day: eine Kombiwette pro Tag aus mehreren sehr wahrscheinlichen Einzeltipps
 STAKE_BOTD = 50.0          # Einsatz
@@ -64,6 +66,7 @@ def init_bets(con):
         profit REAL, settled_at TEXT,
         PRIMARY KEY (match_id, kind)
     )""")
+    calib.ensure_prob_column(con, MARGIN)
     con.execute("CREATE TABLE IF NOT EXISTS botd_log (day TEXT PRIMARY KEY, match_id INTEGER)")
     con.execute("""
     CREATE TABLE IF NOT EXISTS combos (
@@ -96,24 +99,39 @@ def get_model(con, code):
     return _models[code]
 
 
-def selected_bets(p):
-    """Nur die Tipps, bei denen das Modell ueber der Schwelle liegt: [(kind, pick, prob)]."""
+BASE_STAKE = {"1X2": STAKE_1X2, "SCORE": STAKE_SCORE, "OU": STAKE_OU}
+MIN_PROB = {"1X2": MIN_PROB_1X2, "SCORE": MIN_PROB_SCORE, "OU": MIN_PROB_OU}
+
+
+def stake_for(kind, prob):
+    """Einsatz nach Sicherheit: an der Schwelle der Grundeinsatz, bei 100 % das MAX_STAKE_FACTOR-fache."""
+    thr = MIN_PROB[kind]
+    f = 1 + (MAX_STAKE_FACTOR - 1) * (prob - thr) / (1 - thr)
+    f = max(1.0, min(MAX_STAKE_FACTOR, f))
+    return round(BASE_STAKE[kind] * f * 2) / 2          # auf 0.50 CHF gerundet
+
+
+def selected_bets(p, fac=None):
+    """Nur die Tipps, bei denen die (selbstkorrigierte) Wahrscheinlichkeit ueber der Schwelle liegt.
+    Liefert [(kind, pick, modell_prob, korrigierte_prob, einsatz)]."""
+    fac = fac or {}
     probs = {"1": p["p_home"], "X": p["p_draw"], "2": p["p_away"]}
     p_over = p[f"p_o{int(OU_LINE * 10)}"]
     ou_pick, ou_prob = (("Over", p_over) if p_over >= 0.5 else ("Under", 1 - p_over))
     out = []
-    if probs[p["tip_1x2"]] >= MIN_PROB_1X2:
-        out.append(("1X2", p["tip_1x2"], probs[p["tip_1x2"]]))
-    if p["score_prob"] >= MIN_PROB_SCORE:
-        out.append(("SCORE", p["tip_score"], p["score_prob"]))
-    if ou_prob >= MIN_PROB_OU:
-        out.append(("OU", f"{ou_pick} {OU_LINE}", ou_prob))
+    for kind, pick, prob in (("1X2", p["tip_1x2"], probs[p["tip_1x2"]]),
+                             ("SCORE", p["tip_score"], p["score_prob"]),
+                             ("OU", f"{ou_pick} {OU_LINE}", ou_prob)):
+        pc = min(0.99, prob * fac.get(kind, {}).get("factor", 1.0))
+        if pc >= MIN_PROB[kind]:
+            out.append((kind, pick, prob, pc, stake_for(kind, pc)))
     return out
 
 
 def place_bets(con, days):
     now = datetime.now(timezone.utc)
     placed = []
+    fac = calib.factors(con)
     for code, name in bot.LEAGUES.items():
         try:
             model = get_model(con, code)
@@ -134,12 +152,11 @@ def place_bets(con, days):
             if min(games.get(home, 0), games.get(away, 0)) < MIN_GAMES:
                 continue
             p = bot.predict(model, home, away)
-            for kind, pick, prob in selected_bets(p):
-                stake = {"1X2": STAKE_1X2, "SCORE": STAKE_SCORE, "OU": STAKE_OU}[kind]
+            for kind, pick, prob, pc, stake in selected_bets(p, fac):
                 odds = make_odds(prob)
                 cur = con.execute(
-                    "INSERT OR IGNORE INTO bets (match_id, kind, pick, stake, odds, placed_at) "
-                    "VALUES (?,?,?,?,?,?)", (mid, kind, pick, stake, odds, now.isoformat()))
+                    "INSERT OR IGNORE INTO bets (match_id, kind, pick, stake, odds, placed_at, prob) "
+                    "VALUES (?,?,?,?,?,?,?)", (mid, kind, pick, stake, odds, now.isoformat(), prob))
                 if cur.rowcount:
                     placed.append((name, home, away, kind, pick, stake, odds))
     con.commit()
@@ -404,18 +421,18 @@ def build_tips_text(placed, emoji=False):
     title = "\u26bd Neue Tipps:" if emoji else "Neue Tipps:"
     by_league = {}
     for league, home, away, kind, pick, stake, odds in placed:
-        by_league.setdefault(league, {}).setdefault((home, away), {})[kind] = (pick, odds)
+        by_league.setdefault(league, {}).setdefault((home, away), {})[kind] = (pick, odds, stake)
     lines = [title]
     for league, games in by_league.items():
         lines.append(f"\n{league}:")
         for (home, away), b in games.items():
             parts = []
             if "1X2" in b:
-                parts.append(f"Tipp {b['1X2'][0]} (@{b['1X2'][1]:.2f})")
+                parts.append(f"Tipp {b['1X2'][0]} (@{b['1X2'][1]:.2f}, {b['1X2'][2]:g} CHF)")
             if "SCORE" in b:
-                parts.append(f"Resultat {b['SCORE'][0]} (@{b['SCORE'][1]:.2f})")
+                parts.append(f"Resultat {b['SCORE'][0]} (@{b['SCORE'][1]:.2f}, {b['SCORE'][2]:g} CHF)")
             if "OU" in b:
-                parts.append(f"{b['OU'][0]} (@{b['OU'][1]:.2f})")
+                parts.append(f"{b['OU'][0]} (@{b['OU'][1]:.2f}, {b['OU'][2]:g} CHF)")
             lines.append(f"{home} - {away}: " + ", ".join(parts))
     return "\n".join(lines)
 

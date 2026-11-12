@@ -27,10 +27,26 @@ def _split(text):
     return chunks
 
 
-def send(text):
+def api(method, **params):
+    """Telegram-API-Aufruf. Gibt das Ergebnis zurueck oder None bei Fehler."""
+    token = os.environ.get("TELEGRAM_TOKEN")
+    if not token:
+        return None
+    try:
+        r = requests.post(API.format(token=token, method=method), json=params, timeout=40)
+    except requests.RequestException as e:
+        print("Telegram: Verbindungsfehler", type(e).__name__)
+        return None
+    if not r.ok:
+        print("Telegram-Fehler", method, r.status_code, r.json().get("description", ""))
+        return None
+    return r.json().get("result")
+
+
+def send(text, chat_id=None):
     """Sendet Text an Telegram. Gibt True bei Erfolg zurueck."""
     token = os.environ.get("TELEGRAM_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
         print("Telegram nicht konfiguriert (TELEGRAM_TOKEN / TELEGRAM_CHAT_ID fehlen).")
         return False

@@ -1,0 +1,40 @@
+name: Telegram-Befehle
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # alle 10 Minuten (GitHub startet oft ein paar Minuten spaeter)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: telegram
+  cancel-in-progress: false
+
+jobs:
+  answer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Pakete installieren
+        run: pip install -r requirements.txt
+
+      - name: Datenbank laden (nur lesen)
+        run: |
+          if git ls-remote --exit-code --heads origin data > /dev/null 2>&1; then
+            git fetch --depth=1 origin data
+            git show FETCH_HEAD:tippbot.db > tippbot.db
+          fi
+
+      - name: Befehle beantworten
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python commands.py

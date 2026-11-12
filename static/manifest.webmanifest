@@ -1,0 +1,16 @@
+{
+  "name": "Tippbot",
+  "short_name": "Tippbot",
+  "description": "Fussball-Tipps, Fake-Wetten und Multiplikator-Challenge",
+  "lang": "de-CH",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0b0f19",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png"},
+    {"src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}
