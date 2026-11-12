@@ -137,6 +137,14 @@ h2{font-size:13px;font-weight:700;color:var(--mute);text-transform:uppercase;let
 .leg .ic{flex:none;width:20px;text-align:center}
 .leg small{color:var(--mute)}
 .star{border:1px solid transparent;background:linear-gradient(var(--card),var(--card)) padding-box,linear-gradient(135deg,var(--acc),var(--acc2),#db2777) border-box}
+.duo{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin:20px 0 4px;padding:12px 16px;background:var(--card);border:1px solid var(--line);border-radius:16px;font-size:13px;box-shadow:var(--shadow)}
+.duo b{font-weight:800}
+.duo a{margin-left:auto;font-weight:700;text-decoration:none}
+.conn{display:inline-flex;align-items:center;gap:6px;font-weight:600}
+.conn i{width:9px;height:9px;border-radius:50%;background:var(--bx)}
+.conn.on i{background:#16a34a;box-shadow:0 0 0 3px rgba(22,163,74,.18)}
+.conn.off i{background:#dc2626;box-shadow:0 0 0 3px rgba(220,38,38,.18)}
+.conn small{color:var(--mute);font-weight:500}
 .kicker{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--acc)}
 </style>
 </head>
@@ -149,19 +157,20 @@ h2{font-size:13px;font-weight:700;color:var(--mute);text-transform:uppercase;let
   </div>
   <nav id="tabs"></nav>
 </header>
-<main id="view"></main>
+<main><div id="view"></div><footer id="duo" class="duo"></footer></main>
 <script>
 const D = __DATA__;
 const LOADED = Date.now();
 const ICON = {
   tips: '<path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z"/><path d="m12 7 3.5 2.5-1.3 4h-4.4l-1.3-4Z"/><path d="M12 3v4M15.5 9.5 20 8M14.2 13.5l2.3 4.5M9.8 13.5 7.5 18M8.5 9.5 4 8"/>',
+  duell: '<path d="M14.5 17.5 3 6V3h3l11.5 11.5"/><path d="m13 19 6-6M16 16l4 4M19 21l2-2"/><path d="M9.5 6.5 14 2h3v3l-4.5 4.5"/><path d="m5 14 4 4M7 17l-3 3M3 19l2 2"/>',
   multi: '<path d="M4 18 10 12l4 4 6-8"/><path d="M15 8h5v5"/>',
   konto: '<rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10h18M16 15h2"/>',
   wetten: '<path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/>',
   tabelle: '<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0Z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/>',
   modell: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>'
 };
-const TABS = [["tips","Tipps"],["multi","Multiplikator"],["konto","Konto"],["wetten","Wetten"],["tabelle","Tabelle"],["modell","Modell"]];
+const TABS = [["tips","Tipps"],["duell","Duell"],["multi","Multi"],["konto","Konto"],["wetten","Wetten"],["tabelle","Tabelle"],["modell","Modell"]];
 const KIND = {"1X2":"Tipp","SCORE":"Resultat","OU":"Over/Under","BOTD":"Bet of the day"};
 const PICKS = {"1":"Heimsieg","2":"Auswärtssieg","X":"Unentschieden","1X":"Heimsieg oder Unentschieden","X2":"Auswärtssieg oder Unentschieden"};
 const pickLabel = p => p.startsWith("Over") ? "Über " + p.split(" ")[1] + " Tore" : p.startsWith("Under") ? "Unter " + p.split(" ")[1] + " Tore" : (PICKS[p] || p);
@@ -438,11 +447,89 @@ function modell() {
     '</tbody></table></div><div class="note">1.00 = Ligadurchschnitt. Höherer Angriff und niedrigere Abwehr sind besser. Gesamt = Angriff / Abwehr.</div>';
 }
 
-const VIEWS = {tips, multi, konto, wetten, tabelle, modell};
+// ---------- Tippduell-Challenge ----------
+const DUEL_STATUS = {open: "läuft", lost: "verloren", won: "Ziel erreicht 🏆", void: "storniert"};
+const DUEL_BADGE = {open: "OPEN", won: "WON", lost: "LOST", void: "VOID"};
+const DUEL_ICON = {open: "⏳", won: "✅", lost: "❌", void: "↩️"};
+
+function duelBet(b, i) {
+  const res = b.status === "open" ? badge("OPEN") : b.status === "void" ? badge("VOID")
+    : `<b class="${b.status === "won" ? "pos" : "neg"} num">${b.status === "won" ? fr(b.payout) + " CHF" : "−" + fr(b.stake)}</b>`;
+  const legs = b.legs.map(l => `<div class="leg"><span class="ic">${DUEL_ICON[l.status]}</span><div>${esc(l.home)} – ${esc(l.away)}: <b>${esc(l.label)}</b><br><small>${dt(l.kickoff)} · ${esc(l.competition)} · @${l.odds.toFixed(2)}${l.score ? " · Endstand " + esc(l.score) : ""}</small></div></div>`).join("");
+  return `<div class="card${b.status === "open" ? " star" : ""}"><div class="bet"><div class="l"><div class="kicker">Wette ${i + 1} · ${b.legs.length === 1 ? "Einzelwette" : "Kombi"}</div>
+    <div class="t">Einsatz ${fr(b.stake)} CHF @${b.odds.toFixed(2)}</div><div class="s">Chance laut Modell ${pct(b.probability)} · gesetzt ${dt(b.placed)}</div></div>
+    <div class="r">${res}</div></div><div class="legs">${legs}</div></div>`;
+}
+
+function duell() {
+  const C = D.duel || {attempts: [], start: 100, goal: 100000};
+  const atts = C.attempts;
+  const cur = atts.find(a => a.status === "open") || atts[atts.length - 1];
+  let h = "";
+  if (cur) {
+    const prog = cur.bank > C.start ? Math.min(1, Math.log(cur.bank / C.start) / Math.log(C.goal / C.start)) : 0;
+    const best = atts.reduce((m, a) => Math.max(m, a.peak), 0);
+    h += `<div class="card hero"><div class="lbl">🥊 Tippduell vs. GoalOracle · Versuch #${cur.n}</div>
+      <div class="big num">${fr(cur.bank)} CHF</div>
+      <div class="row2"><span>Ziel <b class="num">${fr(C.goal)} CHF</b></span><span>×${(cur.bank / C.start).toFixed(1)} von ×${(C.goal / C.start).toFixed(0)}</span><span>${DUEL_STATUS[cur.status]}</span></div>
+      <div class="prog"><i style="width:${Math.max(2, prog * 100).toFixed(1)}%"></i></div></div>
+      <div class="grid">
+      ${m("Versuche", atts.length)}
+      ${m("Höchststand dieser Versuch", fr(cur.peak) + " CHF")}
+      ${m("Bester Versuch je", fr(best) + " CHF")}
+      </div>`;
+    if (!cur.bets.length || cur.bets[cur.bets.length - 1].status !== "open")
+      h += '<div class="card empty">Gerade keine Wette offen. Der Bot sucht stündlich nach Spielen in den nächsten 36 Stunden mit einer Gesamtquote von 1.85 bis 2.30.</div>';
+    if (cur.bets.length) h += `<h2>Wetten in Versuch #${cur.n}</h2>` + cur.bets.map(duelBet).reverse().join("");
+  } else h += '<div class="card empty">Die Challenge startet beim nächsten Bot-Lauf.</div>';
+  if (atts.length > 1)
+    h += `<h2>Alle Versuche</h2><div class="card scroll"><table><thead><tr><th>#</th><th>Start</th><th>Wetten</th><th>Höchst</th><th>Ende</th><th>Status</th></tr></thead><tbody>` +
+      atts.slice().reverse().map(a => `<tr><td>${a.n}</td><td>${day(a.started)}</td><td>${a.bets.length}</td><td>${fr(a.peak)}</td><td><b>${fr(a.bank)}</b></td><td>${DUEL_STATUS[a.status]}</td></tr>`).join("") + "</tbody></table></div>";
+  h += `<div class="note">Regeln: Start mit ${fr(C.start)} CHF, immer nur eine offene Wette, der ganze Betrag wird gesetzt. Gesamtquote 1.85 bis 2.30, Einzelwette oder Kombi mit 2–3 Spielen; der Bot nimmt die Variante mit der höchsten Chance laut Modell. Eine verlorene Wette beendet den Versuch, der nächste startet wieder mit ${fr(C.start)} CHF. Quoten aus dem Modell des Bots.</div>`;
+  return h;
+}
+
+// ---------- Statuszeile «Tippduell» ----------
+const DUEL_URLS = {
+  own: "https://joellanini26-arch.github.io/tippbot/duel.json",
+  cfg: "https://timeo44.github.io/goaloracle/duel-config.json",
+  rival: "https://timeo44.github.io/goaloracle/duel.json",
+  cmp: "https://timeo44.github.io/goaloracle/vergleich.html"
+};
+async function loadJson(url) {
+  let r;
+  try { r = await fetch(url + "?t=" + Date.now(), {cache: "no-store"}); } catch (e) { return {err: "nicht erreichbar"}; }
+  if (!r.ok) return {err: "nicht erreichbar"};
+  try { return {json: await r.json()}; } catch (e) { return {err: "falsches Format"}; }
+}
+function checkDuel(res) {
+  if (res.err) return {ok: false, why: res.err};
+  const j = res.json;
+  if (!j || typeof j.format !== "string" || !j.format.startsWith("tippduell/")) return {ok: false, why: "falsches Format"};
+  const t = Date.parse(j.updated);
+  if (isNaN(t)) return {ok: false, why: "falsches Format"};
+  const age = (Date.now() - t) / 3600000;
+  return age <= 26 ? {ok: true} : {ok: false, why: "seit " + Math.round(age) + " Std. nicht aktualisiert"};
+}
+async function duelStatus() {
+  const el = $("#duo");
+  const item = (name, c) => `<span class="conn ${c ? (c.ok ? "on" : "off") : ""}"><i></i>${name}: ${c ? (c.ok ? "Connected" : "Not connected" + ` <small>(${esc(c.why)})</small>`) : "wird geprüft …"}</span>`;
+  const draw = (a, b) => { el.innerHTML = `<b>Tippduell</b>${item("Tippbot", a)}${item("GoalOracle", b)}<a href="${DUEL_URLS.cmp}" target="_blank" rel="noopener">Zum Vergleich →</a>`; };
+  draw(null, null);
+  const [own, cfg, rival] = await Promise.all([loadJson(DUEL_URLS.own), loadJson(DUEL_URLS.cfg), loadJson(DUEL_URLS.rival)]);
+  let mine = checkDuel(own);
+  if (mine.ok) {
+    if (cfg.err) mine = {ok: false, why: "nicht eingetragen (" + cfg.err + ")"};
+    else if (!cfg.json || cfg.json.partner_url !== DUEL_URLS.own) mine = {ok: false, why: "nicht eingetragen"};
+  }
+  draw(mine, checkDuel(rival));
+}
+
+const VIEWS = {tips, duell, multi, konto, wetten, tabelle, modell};
 function render() {
   $("#tabs").innerHTML = TABS.map(t => `<button data-tab="${t[0]}" class="${state.tab === t[0] ? "on" : ""}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICON[t[0]]}</svg><span>${t[1]}</span></button>`).join("");
   $("#view").innerHTML = VIEWS[state.tab]();
-  $("#lg").style.visibility = state.tab === "multi" ? "hidden" : "visible";
+  $("#lg").style.visibility = state.tab === "multi" || state.tab === "duell" ? "hidden" : "visible";
 }
 $("#lg").innerHTML = '<option value="ALL">Alle Ligen</option>' + Object.keys(D.leagues).map(c => `<option value="${esc(c)}">${esc(D.leagues[c])}</option>`).join("");
 $("#lg").value = state.league;
@@ -456,6 +543,8 @@ $("#view").addEventListener("click", e => {
   const b = e.target.closest("button[data-kind]"); if (!b) return; state.kind = b.dataset.kind; render(); });
 $("#stand").textContent = "Stand " + new Date(D.generated).toLocaleString("de-CH", {timeZone: "Europe/Zurich", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"}) + " · Fake-Geld";
 render();
+duelStatus();
+setInterval(duelStatus, 5 * 60 * 1000);
 setTimeout(() => location.reload(), 10 * 60 * 1000);
 if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
 document.addEventListener("visibilitychange", () => {   // App wieder geoeffnet: neuen Stand laden, falls aelter als 10 Min.

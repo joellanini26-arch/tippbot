@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 
 import bot
 import calib
+import duel
 import multi
 import paper
 
@@ -186,13 +187,22 @@ def main():
     bot.init_db(con)
     paper.init_bets(con)
     multi.init(con)
+    duel.init(con)
     data = build_data(con)
+    duel_data = duel.duel_json(con)
+    data["duel"] = duel_data["challenge"]
+    data["duel_partner"] = duel.PARTNER_URL
     con.close()
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
     html = TEMPLATE.replace("__DATA__", payload)
     os.makedirs(OUT_DIR, exist_ok=True)
     with open(os.path.join(OUT_DIR, "index.html"), "w", encoding="utf-8") as f:
         f.write(html)
+    # Tippduell: oeffentliche Datei fuer den Vergleich mit GoalOracle (Format tippduell/1)
+    with open(os.path.join(OUT_DIR, "duel.json"), "w", encoding="utf-8") as f:
+        json.dump(duel_data, f, ensure_ascii=False, indent=1)
+    with open(os.path.join(OUT_DIR, "duel-config.json"), "w", encoding="utf-8") as f:
+        json.dump({"partner_url": duel.PARTNER_URL, "updated": duel_data["updated"]}, f)
     if os.path.isdir(STATIC_DIR):
         shutil.copytree(STATIC_DIR, OUT_DIR, dirs_exist_ok=True)
     print(f"Dashboard geschrieben: {len(html) // 1024} KB, "

@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 import bot
 import calib
+import duel
 import multi
 import notify
 
@@ -465,6 +466,7 @@ def main():
     bot.init_db(con)
     init_bets(con)
     multi.init(con)
+    duel.init(con)
     if args.multi_start:
         try:
             rid = multi.start_run(con, args.multi_start,
@@ -494,6 +496,14 @@ def main():
         botd_text = build_botd_text(botd, botd_record(con))
         print("\n" + build_botd_text(botd, botd_record(con), emoji=False))
 
+    duel_events = duel.settle(con)
+    duel_placed = duel.place(con)
+    duel_text = duel.build_text(duel_placed, duel_events)
+    if duel_text:
+        print("\n" + duel_text)
+    elif duel_placed == {}:
+        print("\nTippduell: gerade keine passende Wette, naechster Versuch beim naechsten Lauf")
+
     multi_events = multi.settle(con)
     multi_placed = multi.place(con)
     multi_text = multi.build_text(multi_placed, multi_events)
@@ -504,7 +514,7 @@ def main():
 
     if args.no_telegram:
         pass
-    elif not results and not placed and botd is None and not multi_text:
+    elif not results and not placed and botd is None and not multi_text and not duel_text:
         print("\nTelegram: nichts Neues, keine Nachricht gesendet")
     else:
         parts = []
@@ -512,6 +522,8 @@ def main():
             parts.append(botd_text)
         if multi_text:
             parts.append(multi_text)
+        if duel_text:
+            parts.append(duel_text)
         if results:
             parts.append(build_report(results, acc, emoji=True))
         if placed:
