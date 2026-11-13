@@ -137,6 +137,15 @@ h2{font-size:13px;font-weight:700;color:var(--mute);text-transform:uppercase;let
 .leg .ic{flex:none;width:20px;text-align:center}
 .leg small{color:var(--mute)}
 .star{border:1px solid transparent;background:linear-gradient(var(--card),var(--card)) padding-box,linear-gradient(135deg,var(--acc),var(--acc2),#db2777) border-box}
+.cr{position:relative;display:inline-grid;place-items:center;flex:none;width:var(--s,20px);height:var(--s,20px);border-radius:50%;background:var(--card2);vertical-align:middle;overflow:hidden}
+.cr b{font-size:calc(var(--s,20px) * .38);font-weight:800;color:var(--mute);letter-spacing:-.02em}
+.cr img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.cr.has b{display:none}
+.cr.has:not(.flag){background:none;border-radius:0;overflow:visible}
+.cr.flag img{object-fit:cover}
+.tm{display:inline-flex;align-items:center;gap:6px;min-width:0;vertical-align:middle}
+.teams .t{display:flex;align-items:center;gap:8px}
+.teams .t:last-child{justify-content:flex-end}
 .live{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:800;color:#dc2626;white-space:nowrap;font-variant-numeric:tabular-nums}
 .live::before{content:"";width:7px;height:7px;border-radius:50%;background:#dc2626;animation:pulse 1.4s infinite}
 .live.end{color:var(--fg)}.live.end::before{display:none}
@@ -213,7 +222,7 @@ const legList = legs => `<div class="legs">` + legs.map(l => {
   const ev = l.state === "OPEN" ? liveOf(l.league, l.utc, l.home, l.away) : null;
   const ok = ev ? liveCheck(l.pick, ev) : null;
   const ic = ok === true ? "🟢" : ok === false ? "🔴" : LEGMARK[l.state];
-  return `<div class="leg"><span class="ic">${ic}</span><div>${esc(l.home)} – ${esc(l.away)}: <b>${esc(pickLabel(l.pick))}</b> ${liveTag(ev)}<br><small>${l.utc ? dt(l.utc) + " · " : ""}@${l.odds.toFixed(2)}${l.prob != null ? " · " + pct(l.prob) : ""}${l.hg != null ? " · Endstand " + l.hg + ":" + l.ag : ""}</small></div></div>`;
+  return `<div class="leg"><span class="ic">${ic}</span><div>${pair(l.home, l.away, 16)}: <b>${esc(pickLabel(l.pick))}</b> ${liveTag(ev)}<br><small>${l.utc ? dt(l.utc) + " · " : ""}@${l.odds.toFixed(2)}${l.prob != null ? " · " + pct(l.prob) : ""}${l.hg != null ? " · Endstand " + l.hg + ":" + l.ag : ""}</small></div></div>`;
 }).join("") + "</div>";
 const comboLive = (legs, stake, odds, open) => {
   if (!open) return "";
@@ -222,6 +231,16 @@ const comboLive = (legs, stake, odds, open) => {
   const tag = st.includes(false) ? stateTag(false) : st.every(x => x === true) ? stateTag(true) : '<span class="badge open">⏳ läuft, noch offen</span>';
   return `<div class="livebox">${tag}<span class="num"><small>bei Treffer</small> <b>${fr(stake * odds)} CHF</b></span></div>`;
 };
+
+// ---------- Wappen ----------
+const initials = n => String(n).replace(/[^A-Za-zÀ-ÿ0-9 ]/g, "").split(" ").filter(Boolean).map(w => w[0]).join("").slice(0, 2).toUpperCase() || "?";
+function crest(name, size) {
+  const url = (D.crests || {})[name];
+  const flag = url && url.includes("flagcdn");
+  return `<span class="cr${url ? " has" : ""}${flag ? " flag" : ""}" style="--s:${size || 20}px"><b>${esc(initials(name))}</b>${url ? `<img src="${esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.parentNode.classList.remove('has','flag');this.remove()">` : ""}</span>`;
+}
+const team = (name, size) => `<span class="tm">${crest(name, size)}<span>${esc(name)}</span></span>`;
+const pair = (h, a, size) => `${team(h, size)} – ${team(a, size)}`;
 
 // ---------- Live-Resultate (ESPN, im Browser) ----------
 const ESPN_SLUG = {PL: "eng.1", PD: "esp.1", BL1: "ger.1", SA: "ita.1", FL1: "fra.1", NL: "uefa.nations",
@@ -354,7 +373,7 @@ function tips() {
       : `<div class="skip"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M8 12h8"/></svg>Kein Tipp: zu unsicher</div>`;
     return `<div class="card">
       <div class="meta"><span class="lg"><i class="dot"></i>${esc(lname(r.league))}</span><span>${dt(r.utc)}</span></div>
-      <div class="teams"><span class="t">${esc(r.home)}</span><span class="vs">VS</span><span class="t">${esc(r.away)}</span></div>
+      <div class="teams"><span class="t">${crest(r.home, 30)}<span>${esc(r.home)}</span></span><span class="vs">VS</span><span class="t"><span>${esc(r.away)}</span>${crest(r.away, 30)}</span></div>
       <div class="bar"><i class="b1" style="flex:${r.p1}"></i><i class="bx" style="flex:${r.px}"></i><i class="b2" style="flex:${r.p2}"></i></div>
       <div class="probs"><span>1 <b>${pct(r.p1)}</b></span><span>X <b>${pct(r.px)}</b></span><span>2 <b>${pct(r.p2)}</b></span></div>
       <div class="chips" style="margin-bottom:10px">
@@ -568,7 +587,7 @@ function wetten() {
       return `<div class="bl"><div class="l">${KIND[b.kind]} <b>${esc(b.kind === "OU" ? pickLabel(b.pick) : b.pick)}</b><br><small>@${b.odds.toFixed(2)} · Einsatz ${b.stake.toFixed(2)} CHF</small></div><div class="r">${r}</div></div>`;
     }).join("");
     return `<div class="card"><div class="meta"><span class="lg"><i class="dot"></i>${esc(lname(c.league))}</span><span>${ev ? liveTag(ev) : dt(c.utc)}</span></div>
-      <div class="bet" style="margin:8px 0 6px"><div class="t">${esc(c.home)} – ${esc(c.away)}</div>${head}</div>${lines}</div>`;
+      <div class="bet" style="margin:8px 0 6px"><div class="t">${pair(c.home, c.away, 22)}</div>${head}</div>${lines}</div>`;
   }).join("") + `<div class="note">Angezeigt werden die letzten ${D.bets.length} Wetten. Live-Resultate von ESPN, alle 60 Sekunden aktualisiert. „Geht auf“ gilt für den aktuellen Spielstand; verbucht wird die Wette beim nächsten Bot-Lauf.</div>`;
 }
 
@@ -578,7 +597,7 @@ function tabelle() {
   const t = D.tables[code] || [];
   if (!t.length) return '<div class="card empty">Noch keine beendeten Spiele für diese Liga.</div>';
   return `<h2>${esc(lname(code))}</h2><div class="card scroll"><table><thead><tr><th>#</th><th>Team</th><th>Sp</th><th>S</th><th>U</th><th>N</th><th>Tore</th><th>TD</th><th>Pkt</th></tr></thead><tbody>` +
-    t.map((r, i) => `<tr><td>${i + 1}</td><td><b>${esc(r.team)}</b></td><td>${r.sp}</td><td>${r.s}</td><td>${r.u}</td><td>${r.n}</td><td>${r.gf}:${r.ga}</td><td>${r.td > 0 ? "+" : ""}${r.td}</td><td><b>${r.pkt}</b></td></tr>`).join("") + "</tbody></table></div>";
+    t.map((r, i) => `<tr><td>${i + 1}</td><td><b>${team(r.team, 20)}</b></td><td>${r.sp}</td><td>${r.s}</td><td>${r.u}</td><td>${r.n}</td><td>${r.gf}:${r.ga}</td><td>${r.td > 0 ? "+" : ""}${r.td}</td><td><b>${r.pkt}</b></td></tr>`).join("") + "</tbody></table></div>";
 }
 
 function modell() {
@@ -587,7 +606,7 @@ function modell() {
   if (!t.length) return '<div class="card empty">Noch zu wenig Daten für das Modell.</div>';
   const mx = Math.max(...t.map(r => r.total));
   return `<h2>${esc(lname(code))} · Teamstärken</h2><div class="card scroll"><table><thead><tr><th>#</th><th>Team</th><th>Angriff</th><th>Abwehr</th><th>Gesamt</th></tr></thead><tbody>` +
-    t.map((r, i) => `<tr><td>${i + 1}</td><td><b>${esc(r.team)}</b><div class="bar" style="height:4px;margin-top:4px;max-width:160px"><i class="b1" style="flex:${r.total / mx}"></i><i style="flex:${1 - r.total / mx}"></i></div></td><td>${r.att.toFixed(2)}</td><td>${r.dfn.toFixed(2)}</td><td><b>${r.total.toFixed(2)}</b></td></tr>`).join("") +
+    t.map((r, i) => `<tr><td>${i + 1}</td><td><b>${team(r.team, 20)}</b><div class="bar" style="height:4px;margin-top:4px;max-width:160px"><i class="b1" style="flex:${r.total / mx}"></i><i style="flex:${1 - r.total / mx}"></i></div></td><td>${r.att.toFixed(2)}</td><td>${r.dfn.toFixed(2)}</td><td><b>${r.total.toFixed(2)}</b></td></tr>`).join("") +
     '</tbody></table></div><div class="note">1.00 = Ligadurchschnitt. Höherer Angriff und niedrigere Abwehr sind besser. Gesamt = Angriff / Abwehr.</div>';
 }
 
@@ -600,7 +619,7 @@ function duelBet(b, i) {
   const res = b.status === "open" ? badge("OPEN") : b.status === "void" ? badge("VOID")
     : `<b class="${b.status === "won" ? "pos" : "neg"} num">${b.status === "won" ? fr(b.payout) + " CHF" : "−" + fr(b.stake)}</b>`;
   const lv = b.legs.map(l => { const ev = l.status === "open" ? liveOf(l.competition, l.kickoff, l.home, l.away) : null; return {ev, ok: ev ? liveCheck(l.pick, ev) : l.status === "lost" ? false : l.status === "open" ? null : true}; });
-  const legs = b.legs.map((l, j) => `<div class="leg"><span class="ic">${lv[j].ev ? (lv[j].ok ? "🟢" : "🔴") : DUEL_ICON[l.status]}</span><div>${esc(l.home)} – ${esc(l.away)}: <b>${esc(l.label)}</b> ${liveTag(lv[j].ev)}<br><small>${dt(l.kickoff)} · ${esc(l.competition)} · @${l.odds.toFixed(2)}${l.score ? " · Endstand " + esc(l.score) : ""}</small></div></div>`).join("");
+  const legs = b.legs.map((l, j) => `<div class="leg"><span class="ic">${lv[j].ev ? (lv[j].ok ? "🟢" : "🔴") : DUEL_ICON[l.status]}</span><div>${pair(l.home, l.away, 16)}: <b>${esc(l.label)}</b> ${liveTag(lv[j].ev)}<br><small>${dt(l.kickoff)} · ${esc(l.competition)} · @${l.odds.toFixed(2)}${l.score ? " · Endstand " + esc(l.score) : ""}</small></div></div>`).join("");
   const anyLive = lv.some(x => x.ev);
   const box = b.status !== "open" ? "" : `<div class="livebox">${anyLive ? (lv.some(x => x.ok === false) ? stateTag(false) : lv.every(x => x.ok === true) ? stateTag(true) : '<span class="badge open">⏳ läuft, noch offen</span>') : "<small>Auszahlung bei Treffer</small>"}<b class="num">${fr(b.stake * b.odds)} CHF</b></div>`;
   return `<div class="card${b.status === "open" ? " star" : ""}"><div class="bet"><div class="l"><div class="kicker">Wette ${i + 1} · ${b.legs.length === 1 ? "Einzelwette" : "Kombi"}</div>

@@ -67,6 +67,9 @@ def init_db(con):
         home_goals INTEGER, away_goals INTEGER,
         league TEXT DEFAULT 'PL'
     );
+    CREATE TABLE IF NOT EXISTS crests (
+        team TEXT PRIMARY KEY, url TEXT
+    );
     CREATE TABLE IF NOT EXISTS tips (
         match_id INTEGER PRIMARY KEY,
         created_at TEXT,
@@ -122,8 +125,12 @@ def fetch_matches(con, full=False):
                 hint = " (nicht im Gratis-Tarif?)" if r.status_code == 403 else ""
                 print(f"{name} {s}: API-Fehler {r.status_code}{hint}, uebersprungen")
                 continue
-            rows = []
+            rows, crests = [], {}
             for m in r.json().get("matches", []):
+                for side in ("homeTeam", "awayTeam"):        # Wappen fuers Dashboard merken
+                    t = m[side]
+                    if t.get("crest"):
+                        crests[t.get("shortName") or t["name"]] = t["crest"]
                 ft = m["score"]["fullTime"]
                 rows.append((
                     m["id"], s, m.get("matchday"), m["utcDate"], m["status"],
@@ -134,6 +141,7 @@ def fetch_matches(con, full=False):
             con.executemany(
                 "INSERT OR REPLACE INTO matches (id, season, matchday, utc_date, status, "
                 "home, away, home_goals, away_goals, league) VALUES (?,?,?,?,?,?,?,?,?,?)", rows)
+            con.executemany("INSERT OR REPLACE INTO crests (team, url) VALUES (?,?)", crests.items())
             con.commit()
             print(f"{name} {s}: {len(rows)} Spiele gespeichert")
 

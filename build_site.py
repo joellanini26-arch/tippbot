@@ -24,6 +24,32 @@ UPCOMING_DAYS = 14
 MAX_BETS = 300
 
 
+# Landesflaggen fuer Nationalteams (ISO-Code fuer flagcdn.com)
+FLAGS = {
+    "Albania": "al", "Andorra": "ad", "Armenia": "am", "Austria": "at", "Azerbaijan": "az", "Belarus": "by",
+    "Belgium": "be", "Bosnia and Herzegovina": "ba", "Bulgaria": "bg", "Croatia": "hr", "Cyprus": "cy",
+    "Czech Republic": "cz", "Denmark": "dk", "England": "gb-eng", "Estonia": "ee", "Faroe Islands": "fo",
+    "Finland": "fi", "France": "fr", "Georgia": "ge", "Germany": "de", "Gibraltar": "gi", "Greece": "gr",
+    "Hungary": "hu", "Iceland": "is", "Israel": "il", "Italy": "it", "Kazakhstan": "kz", "Kosovo": "xk",
+    "Latvia": "lv", "Liechtenstein": "li", "Lithuania": "lt", "Luxembourg": "lu", "Malta": "mt",
+    "Moldova": "md", "Montenegro": "me", "Netherlands": "nl", "North Macedonia": "mk",
+    "Northern Ireland": "gb-nir", "Norway": "no", "Poland": "pl", "Portugal": "pt",
+    "Republic of Ireland": "ie", "Romania": "ro", "San Marino": "sm", "Scotland": "gb-sct", "Serbia": "rs",
+    "Slovakia": "sk", "Slovenia": "si", "Spain": "es", "Sweden": "se", "Switzerland": "ch", "Turkey": "tr",
+    "Ukraine": "ua", "Wales": "gb-wls",
+}
+
+
+def crest_map(con):
+    """Teamname -> Bild-URL (Vereinswappen von football-data.org, Flaggen fuer Nationalteams).
+    Auch unter dem englischen ESPN-Namen, den Duell und Live-Anzeige verwenden."""
+    out = {team: url for team, url in con.execute("SELECT team, url FROM crests") if url}
+    out.update({team: f"https://flagcdn.com/w80/{iso}.png" for team, iso in FLAGS.items()})
+    for team, url in list(out.items()):
+        out.setdefault(duel.espn(team), url)
+    return out
+
+
 def build_data(con):
     now = datetime.now(timezone.utc)
     season = bot.current_season()
@@ -193,6 +219,7 @@ def main():
     data["duel"] = duel_data["challenge"]
     data["duel_partner"] = duel.PARTNER_URL
     data["espn_names"] = duel.ESPN_NAMES          # fuer die Live-Resultate im Browser
+    data["crests"] = crest_map(con)
     con.close()
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
     html = TEMPLATE.replace("__DATA__", payload)
