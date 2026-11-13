@@ -9,7 +9,7 @@ import os
 import shutil
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import bot
 import calib
@@ -21,6 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OUT_DIR = os.path.join(HERE, "site")
 STATIC_DIR = os.path.join(HERE, "static")   # App-Symbole, Manifest, Service Worker
 UPCOMING_DAYS = 14
+HISTORY_DAYS = 120       # so weit zurueck reicht die Gewinn-Historie im Dashboard
 MAX_BETS = 300
 
 
@@ -168,7 +169,7 @@ def build_data(con):
 
     combos = []
     for cid, day, stake, odds, prob, status, profit in con.execute(
-            "SELECT id, day, stake, odds, prob, status, profit FROM combos ORDER BY id DESC LIMIT 60"):
+            "SELECT id, day, stake, odds, prob, status, profit FROM combos ORDER BY id DESC LIMIT 200"):
         legs = combo_legs(cid)
         combos.append({"day": day, "stake": stake, "odds": odds, "prob": prob, "status": status,
                        "profit": profit, "legs": legs, "league": "MIX",
@@ -201,9 +202,41 @@ def build_data(con):
                              "legs": c["legs"]})
     data["bets"].sort(key=lambda b: b["utc"], reverse=True)
     data["bets"] = data["bets"][:MAX_BETS]
+    data["history"], data["history_base"] = history(con, combos, now)
     data["multi"] = multi.data(con)
     data["repo"] = os.environ.get("GITHUB_REPOSITORY", "joellanini26-arch/tippbot")
     return data
+
+
+def history(con, combos, now):
+    """Alle abgerechneten Wetten (normal + Bet of the day) der letzten HISTORY_DAYS Tage, mit Spieltag
+    (Schweizer Zeit). history_base = Kontostand vor diesem Zeitraum."""
+    cutoff = (now - timedelta(days=HISTORY_DAYS)).astimezone(paper.LOCAL_TZ).strftime("%Y-%m-%d")
+    local_day = lambda utc: bot.parse_date(utc).astimezone(paper.LOCAL_TZ).strftime("%Y-%m-%d")
+    rows, older = [], 0.0
+    for utc, league, home, away, kind, pick, stake, odds, status, profit, hg, ag in con.execute("""
+            SELECT m.utc_date, m.league, m.home, m.away, b.kind, b.pick, b.stake, b.odds, b.status,
+                   COALESCE(b.profit, 0), m.home_goals, m.away_goals
+            FROM bets b JOIN matches m ON m.id=b.match_id WHERE b.status IN ('WON','LOST','VOID')"""):
+        d = local_day(utc)
+        if d < cutoff:
+            older += profit
+            continue
+        rows.append({"day": d, "utc": utc, "league": league, "home": home, "away": away, "kind": kind,
+                     "pick": pick, "stake": stake, "odds": odds, "status": status, "profit": round(profit, 2),
+                     "hg": hg, "ag": ag})
+    for c in combos:
+        if c["status"] not in ("WON", "LOST", "VOID"):
+            continue
+        d = local_day(c["utc"])
+        if d < cutoff:
+            older += c["profit"] or 0
+            continue
+        rows.append({"day": d, "utc": c["utc"], "league": "MIX", "home": "Kombi", "away": "", "kind": "BOTD",
+                     "pick": "", "stake": c["stake"], "odds": c["odds"], "status": c["status"],
+                     "profit": round(c["profit"] or 0, 2), "legs": c["legs"]})
+    rows.sort(key=lambda r: r["utc"])
+    return rows, round(paper.START_BALANCE + older, 2)
 
 
 def main():

@@ -167,6 +167,15 @@ h2{font-size:13px;font-weight:700;color:var(--mute);text-transform:uppercase;let
 .tm{display:inline-flex;align-items:center;gap:6px;min-width:0;vertical-align:middle}
 .teams .t{display:flex;align-items:center;gap:8px}
 .teams .t:last-child{justify-content:flex-end}
+details.day{padding:0}
+details.day summary{list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 16px;cursor:pointer}
+details.day summary::-webkit-details-marker{display:none}
+details.day summary .t{font-weight:700}
+details.day summary .r{display:flex;align-items:center;gap:10px;white-space:nowrap}
+details.day .chev{font-size:22px;color:var(--mute);transition:transform .2s;line-height:1}
+details.day[open] .chev{transform:rotate(90deg)}
+details.day .dl{padding:0 16px 8px;border-top:1px solid var(--line)}
+details.day[open] .dl{animation:rise .3s ease both}
 .live{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:800;color:#dc2626;white-space:nowrap;font-variant-numeric:tabular-nums}
 .live::before{content:"";width:7px;height:7px;border-radius:50%;background:#dc2626;animation:pulse 1.4s infinite}
 .live.end{color:var(--fg)}.live.end::before{display:none}
@@ -510,12 +519,54 @@ function konto() {
   return `<div class="card hero"><div class="lbl">Kontostand${state.league !== "ALL" ? " · " + esc(lname(state.league)) : ""}</div>
     <div class="big num">${fr(D.start_balance + total)} CHF</div>
     <div class="row2"><span>G/V <b class="num">${chf(total)}</b></span><span>Rendite <b>${staked ? pct(total / staked) : "–"}</b></span><span>Offen <b>${open.n}</b> (${open.stake.toFixed(0)} CHF)</span></div></div>` +
-    chart(pts) + `<h2>Trefferquoten</h2><div class="grid">
+    chart(pts) + historyView() + `<h2>Trefferquoten</h2><div class="grid">
     ${m(`Tipp 1X2 · ${n1}`, pct(h1))}
     ${m(`Resultat · ${n2}`, pct(h2))}
     ${m(`Over/Under · ${n3}`, pct(h3))}
     ${m(`Bet of the day · ${n4}`, pct(h4))}
   </div>` + selfCheck() + `<div class="note">Fake-Geld. Die Quoten stammen aus dem Modell abzüglich Marge und sagen daher nichts über echte Gewinnchancen gegen Buchmacher aus.</div>`;
+}
+
+// ---------- Gewinn-Historie ----------
+const longDay = d => new Date(d + "T12:00:00Z").toLocaleDateString("de-CH", {weekday: "short", day: "2-digit", month: "2-digit", year: "2-digit"});
+function historyView() {
+  const H = (D.history || []).filter(inLeague);
+  if (!H.length) return '<h2>Gewinn-Historie</h2><div class="card empty">Die Historie erscheint, sobald die ersten Wetten abgerechnet sind.</div>';
+  const all = state.league === "ALL";
+  // Tage zusammenfassen (chronologisch), Kontostand nach jedem Tag
+  const days = [], idx = {};
+  H.forEach(r => { if (!idx[r.day]) { idx[r.day] = {day: r.day, bets: [], profit: 0, won: 0, lost: 0}; days.push(idx[r.day]); }
+    const d = idx[r.day]; d.bets.push(r); d.profit += r.profit; if (r.status === "WON") d.won++; else if (r.status === "LOST") d.lost++; });
+  let bal = all ? D.history_base : 0;
+  days.forEach(d => { bal += d.profit; d.after = bal; });
+  // Highlights
+  const best = days.reduce((a, d) => d.profit > a.profit ? d : a, days[0]);
+  const worst = days.reduce((a, d) => d.profit < a.profit ? d : a, days[0]);
+  const top = H.filter(r => r.status === "WON").sort((a, b) => b.profit - a.profit)[0];
+  let streak = 0, cur = 0;
+  H.forEach(r => { if (r.status === "WON") { cur++; streak = Math.max(streak, cur); } else if (r.status === "LOST") cur = 0; });
+  const label = r => r.kind === "BOTD" ? "⭐ Bet of the day" : `${esc(r.home)} – ${esc(r.away)}`;
+  let h = `<h2>Gewinn-Historie</h2><div class="grid">
+    ${m("Bester Tag · " + longDay(best.day), chf(best.profit) + " CHF", cls(best.profit))}
+    ${m("Schlechtester Tag · " + longDay(worst.day), chf(worst.profit) + " CHF", cls(worst.profit))}
+    ${top ? m("Grösster Gewinn · " + label(top), chf(top.profit) + " CHF", "pos") : m("Grösster Gewinn", "–")}
+    ${m("Längste Treffer-Serie", streak + " in Folge")}
+  </div>`;
+  const shown = days.slice().reverse().slice(0, state.histAll ? 999 : 10);
+  h += shown.map(d => {
+    const lines = d.bets.slice().sort((a, b) => b.profit - a.profit).map(r => {
+      const what = r.kind === "BOTD" ? `Kombi @${r.odds.toFixed(2)}` : `${KIND[r.kind]} <b>${esc(r.kind === "OU" ? pickLabel(r.pick) : r.pick)}</b> @${r.odds.toFixed(2)}`;
+      const res = r.hg != null ? ` · ${r.hg}:${r.ag}` : "";
+      return `<div class="bl"><div class="l">${r.kind === "BOTD" ? "⭐ Bet of the day" : pair(r.home, r.away, 16)}<br><small>${what} · Einsatz ${r.stake.toFixed(2)} CHF${res}</small></div>
+        <div class="r"><b class="${cls(r.profit)} num">${chf(r.profit)}</b>${badge(r.status)}</div></div>`;
+    }).join("");
+    return `<details class="card day"><summary><div class="l"><div class="t">${longDay(d.day)}</div>
+      <div class="s">${d.bets.length} Wetten · <span class="pos">${d.won} ✓</span> · <span class="neg">${d.lost} ✗</span>${all ? ` · Kontostand danach ${fr(d.after)} CHF` : ""}</div></div>
+      <div class="r"><b class="${cls(d.profit)} num">${chf(d.profit)} CHF</b><span class="chev">›</span></div></summary>
+      <div class="dl">${lines}</div></details>`;
+  }).join("");
+  if (days.length > 10 && !state.histAll) h += `<button class="link" id="hist-more" style="margin:2px 4px 8px">Alle ${days.length} Tage anzeigen</button>`;
+  return h;
 }
 
 function selfCheck() {
@@ -753,6 +804,7 @@ $("#tabs").addEventListener("click", e => { const b = e.target.closest("button")
 $("#view").addEventListener("click", e => {
   if (e.target.closest("#m-go")) return startMulti();
   if (e.target.closest("#m-token")) { askToken(); return; }
+  if (e.target.closest("#hist-more")) { state.histAll = true; const y = window.scrollY; $("#view").innerHTML = VIEWS[state.tab](); window.scrollTo(0, y); return; }
   const o = e.target.closest("button[data-only]");
   if (o) { state.only = o.dataset.only === "1"; set("only", state.only ? "1" : "0"); render(); return; }
   const b = e.target.closest("button[data-kind]"); if (!b) return; state.kind = b.dataset.kind; render(); });
