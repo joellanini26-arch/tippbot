@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 import bot
 import calib
+import daygame
 import duel
 import multi
 import notify
@@ -467,6 +468,7 @@ def main():
     init_bets(con)
     multi.init(con)
     duel.init(con)
+    daygame.init(con)
     if args.multi_start:
         try:
             rid = multi.start_run(con, args.multi_start,
@@ -495,6 +497,10 @@ def main():
     if botd is not None:
         botd_text = build_botd_text(botd, botd_record(con))
         print("\n" + build_botd_text(botd, botd_record(con), emoji=False))
+
+    dg = daygame.pick(con)
+    if dg:
+        print(f"\nTagesduell: Spiel des Tages gewaehlt (Bot tippt {dg['bot_score']})")
 
     duel_events = duel.settle(con)
     duel_placed = duel.place(con)

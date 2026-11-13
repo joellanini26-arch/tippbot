@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 import bot
 import calib
+import daygame
 import duel
 import multi
 import paper
@@ -247,7 +248,9 @@ def main():
     paper.init_bets(con)
     multi.init(con)
     duel.init(con)
+    daygame.init(con)
     data = build_data(con)
+    data["daygame"] = daygame.data(con)
     duel_data = duel.duel_json(con)
     data["duel"] = duel_data["challenge"]
     data["duel_partner"] = duel.PARTNER_URL
