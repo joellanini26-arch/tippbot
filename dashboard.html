@@ -66,7 +66,28 @@ main{padding:16px;max-width:880px;margin:0 auto}
 
 /* Bausteine */
 .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px 16px;margin-bottom:12px;box-shadow:var(--shadow)}
-.hero{position:relative;overflow:hidden;border:0;color:#fff;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 55%,#db2777 130%);box-shadow:0 10px 30px rgba(79,70,229,.3)}
+.hero{position:relative;overflow:hidden;border:0;color:#fff;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 40%,#db2777 80%,#7c3aed 100%);background-size:220% 220%;animation:flow 14s ease-in-out infinite;box-shadow:0 10px 30px rgba(79,70,229,.3)}
+
+/* ---------- Animationen ---------- */
+@keyframes flow{0%,100%{background-position:0% 30%}50%{background-position:100% 70%}}
+@keyframes rise{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:none}}
+@keyframes grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes pop{0%{transform:scale(1)}40%{transform:scale(1.22) translateY(-2px)}100%{transform:scale(1)}}
+@keyframes badgein{from{opacity:0;transform:scale(.7)}to{opacity:1;transform:none}}
+@keyframes float{0%,100%{transform:translate(0,0)}50%{transform:translate(-14px,10px)}}
+.anim>*{animation:rise .5s cubic-bezier(.2,.75,.25,1) both;animation-delay:calc(var(--i,0) * 45ms)}
+.anim .metric{animation:rise .5s cubic-bezier(.2,.75,.25,1) both;animation-delay:calc(var(--i,0) * 45ms + var(--j,0) * 35ms)}
+.anim .bar i,.anim .prog i{transform-origin:left center;animation:grow .9s cubic-bezier(.2,.75,.25,1) both;animation-delay:.15s}
+.anim .badge.won,.anim .badge.lost{animation:badgein .35s .3s both}
+.hero::after{animation:float 9s ease-in-out infinite}
+@keyframes draw{to{stroke-dashoffset:0}}
+.anim svg path[fill="none"]{stroke-dasharray:2400;stroke-dashoffset:2400;animation:draw 1.4s .25s cubic-bezier(.3,.6,.3,1) forwards}
+.anim svg circle{animation:badgein .4s 1.4s both}
+nav button.bounce svg{animation:pop .4s ease}
+button,.chip,.btn{transition:transform .12s ease,background-color .2s,color .2s,box-shadow .2s}
+button:active,.btn:active{transform:scale(.95)}
+@media (hover:hover){.card:not(.hero){transition:transform .2s ease,box-shadow .2s ease}.card:not(.hero):hover{transform:translateY(-2px);box-shadow:0 2px 4px rgba(15,23,42,.05),0 12px 28px rgba(15,23,42,.10)}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 .hero::after{content:"";position:absolute;right:-60px;top:-60px;width:200px;height:200px;border-radius:50%;background:rgba(255,255,255,.08)}
 .hero .lbl{font-size:12px;font-weight:600;opacity:.8;text-transform:uppercase;letter-spacing:.06em}
 .hero .big{font-size:32px;font-weight:800;letter-spacing:-.03em;margin:2px 0 6px}
@@ -692,10 +713,38 @@ async function duelStatus() {
 }
 
 const VIEWS = {tips, duell, multi, konto, wetten, tabelle, modell};
+// ---------- Animationen ----------
+const REDUCED = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+let lastTab = null;
+function countUp(el) {                     // Zahl in einer Hero-Karte hochzaehlen
+  const m = el.textContent.match(/^([^\d]*?)([+−-]?)([\d'’]+(?:\.\d+)?)(.*)$/);
+  if (!m) return;
+  const target = parseFloat(m[3].replace(/['’]/g, "")), dec = (m[3].split(".")[1] || "").length;
+  if (!(target > 0)) return;
+  const fmt = v => v.toLocaleString("de-CH", {minimumFractionDigits: dec, maximumFractionDigits: dec});
+  const t0 = performance.now(), dur = 900;
+  const step = now => {
+    const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+    el.textContent = m[1] + m[2] + fmt(target * e) + m[4];
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+function animateView() {
+  const v = $("#view");
+  if (REDUCED) return;
+  v.classList.remove("anim"); void v.offsetWidth; v.classList.add("anim");
+  [...v.children].forEach((c, i) => c.style.setProperty("--i", Math.min(i, 12)));
+  v.querySelectorAll(".grid").forEach(g => [...g.children].forEach((c, j) => c.style.setProperty("--j", j)));
+  v.querySelectorAll(".hero .big").forEach(countUp);
+}
+
 function render() {
-  $("#tabs").innerHTML = TABS.map(t => `<button data-tab="${t[0]}" class="${state.tab === t[0] ? "on" : ""}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICON[t[0]]}</svg><span>${t[1]}</span></button>`).join("");
+  $("#tabs").innerHTML = TABS.map(t => `<button data-tab="${t[0]}" class="${state.tab === t[0] ? "on" : ""}${state.tab === t[0] && lastTab !== null && lastTab !== state.tab ? " bounce" : ""}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICON[t[0]]}</svg><span>${t[1]}</span></button>`).join("");
   $("#view").innerHTML = VIEWS[state.tab]();
   $("#lg").style.visibility = state.tab === "multi" || state.tab === "duell" ? "hidden" : "visible";
+  if (lastTab !== state.tab) animateView();      // nur beim Oeffnen eines Tabs, nicht bei Live-Updates/Filtern
+  lastTab = state.tab;
 }
 $("#lg").innerHTML = '<option value="ALL">Alle Ligen</option>' + Object.keys(D.leagues).map(c => `<option value="${esc(c)}">${esc(D.leagues[c])}</option>`).join("");
 $("#lg").value = state.league;
