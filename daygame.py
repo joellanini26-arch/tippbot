@@ -22,6 +22,33 @@ def init(con):
     CREATE TABLE IF NOT EXISTS day_game (
         day TEXT PRIMARY KEY, match_id INTEGER, bot_score TEXT, bot_prob REAL, chosen_at TEXT
     )""")
+    cols = [r[1] for r in con.execute("PRAGMA table_info(day_game)")]
+    for col in ("bot_1x2", "bot_ou"):                  # Sieger- und Over/Under-Tipp des Bots
+        if col not in cols:
+            con.execute(f"ALTER TABLE day_game ADD COLUMN {col} TEXT")
+    con.commit()
+
+
+def bot_tips(p):
+    """Tipps des Bots fuers Tagesduell: Sieger (1/X/2), Over/Under 2.5 (O/U), Resultat."""
+    return p["tip_1x2"], ("O" if p["p_o25"] >= 0.5 else "U"), p["tip_score"], p["score_prob"]
+
+
+def complete_today(con, now):
+    """Spiel schon gewaehlt, aber ohne Sieger/Over-Under-Tipp (aeltere Version): vor Anpfiff nachtragen."""
+    import paper
+    day = now.astimezone(paper.LOCAL_TZ).strftime("%Y-%m-%d")
+    row = con.execute("""SELECT g.match_id, m.league, m.home, m.away, m.utc_date FROM day_game g
+                         JOIN matches m ON m.id=g.match_id WHERE g.day=? AND g.bot_1x2 IS NULL""", (day,)).fetchone()
+    if not row or bot.parse_date(row[4]) <= now:
+        return
+    mid, league, home, away, _ = row
+    try:
+        p = bot.predict(paper.get_model(con, league), home, away)
+    except (bot.NotEnoughData, KeyError):
+        return
+    w, ou, _, _ = bot_tips(p)
+    con.execute("UPDATE day_game SET bot_1x2=?, bot_ou=? WHERE day=?", (w, ou, day))
     con.commit()
 
 
@@ -34,6 +61,7 @@ def pick(con, now=None):
         return None
     day = local.strftime("%Y-%m-%d")
     if con.execute("SELECT 1 FROM day_game WHERE day=?", (day,)).fetchone():
+        complete_today(con, now)
         return None
     best = None
     for code in bot.LEAGUES:
@@ -56,12 +84,11 @@ def pick(con, now=None):
                 continue
             strength = sum(model["att"][t] / model["dfn"][t] for t in (home, away))
             if not best or strength > best[0]:
-                p = bot.predict(model, home, away)
-                best = (strength, mid, p["tip_score"], p["score_prob"])
+                best = (strength, mid) + bot_tips(bot.predict(model, home, away))
     # Auch an Tagen ohne Spiel eintragen, damit nicht stuendlich neu gesucht wird
-    _, mid, score, prob = best or (None, None, None, None)
-    con.execute("INSERT INTO day_game (day, match_id, bot_score, bot_prob, chosen_at) VALUES (?,?,?,?,?)",
-                (day, mid, score, prob, now.isoformat()))
+    _, mid, w, ou, score, prob = best or (None,) * 6
+    con.execute("INSERT INTO day_game (day, match_id, bot_score, bot_prob, chosen_at, bot_1x2, bot_ou) "
+                "VALUES (?,?,?,?,?,?,?)", (day, mid, score, prob, now.isoformat(), w, ou))
     con.commit()
     return {"day": day, "match_id": mid, "bot_score": score} if mid else None
 
@@ -70,12 +97,13 @@ def data(con, now=None):
     now = now or datetime.now(timezone.utc)
     since = (now - timedelta(days=HISTORY_DAYS)).strftime("%Y-%m-%d")
     out = []
-    for day, mid, score, prob, utc, league, home, away, status, hg, ag in con.execute("""
-            SELECT g.day, g.match_id, g.bot_score, g.bot_prob, m.utc_date, m.league, m.home, m.away,
-                   m.status, m.home_goals, m.away_goals
+    for day, mid, score, prob, w, ou, utc, league, home, away, status, hg, ag in con.execute("""
+            SELECT g.day, g.match_id, g.bot_score, g.bot_prob, g.bot_1x2, g.bot_ou, m.utc_date, m.league,
+                   m.home, m.away, m.status, m.home_goals, m.away_goals
             FROM day_game g JOIN matches m ON m.id = g.match_id
             WHERE g.day >= ? ORDER BY g.day""", (since,)):
-        out.append({"day": day, "id": mid, "bot": score, "bot_prob": prob, "utc": utc, "league": league,
+        out.append({"day": day, "id": mid, "bot": score, "bot_w": w, "bot_ou": ou, "bot_prob": prob,
+                    "utc": utc, "league": league,
                     "home": home, "away": away,
                     "status": "void" if status in ("POSTPONED", "CANCELLED", "SUSPENDED", "AWARDED")
                     else "done" if status == "FINISHED" and hg is not None else "open",

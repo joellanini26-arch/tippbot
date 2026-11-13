@@ -175,6 +175,18 @@ h2{font-size:13px;font-weight:700;color:var(--mute);text-transform:uppercase;let
 .stp{display:flex;align-items:center;gap:10px;background:var(--card2);border-radius:14px;padding:6px}
 .stp b{font-size:28px;font-weight:800;min-width:26px;text-align:center}
 .stp button{font:inherit;font-size:20px;font-weight:700;width:38px;height:38px;border-radius:10px;border:0;background:var(--card);color:var(--fg);box-shadow:var(--shadow);cursor:pointer}
+.dgq{margin:10px 0 4px}
+.dgl{font-size:12px;font-weight:700;color:var(--mute);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;text-align:center}
+.dgl small{color:var(--acc);font-weight:800}
+.dgseg{display:flex;width:100%;margin:0}
+.dgseg button{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:8px 6px}
+.dgt{margin:8px 0 6px}
+.dgt th,.dgt td{text-align:center!important;width:auto!important;color:var(--fg)}
+.dgt td:first-child{text-align:left!important;color:var(--mute);font-size:13px}
+.dgt td b{font-size:15px}
+.dgt tr.sum td{border-top:2px solid var(--line);font-size:14px}
+.dgt.reveal td:last-child{animation:flip .6s ease both}
+.btn:disabled{opacity:.45}
 .dgres{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:6px 0 8px}
 .dgrow{display:flex;flex-direction:column;align-items:center;gap:4px;background:var(--card2);border-radius:14px;padding:10px}
 .dgrow span:first-child{font-size:12px;color:var(--mute);font-weight:600}
@@ -398,23 +410,32 @@ function botdCard() {
 }
 
 // ---------- Tagesduell: Du gegen den Bot ----------
+// Drei Tipps pro Spiel: Sieger (1/X/2) +1, Ueber/Unter 2.5 Tore +1, genaues Resultat +3
 const todayLocal = () => new Date().toLocaleDateString("sv-SE", {timeZone: "Europe/Zurich"});
 const dgGet = day => { try { return JSON.parse(get("dg:" + day, "null")); } catch (e) { return null; } };
 const dgSet = (day, v) => set("dg:" + day, JSON.stringify(v));
 const sgn = x => x > 0 ? 1 : x < 0 ? -1 : 0;
-function dgPoints(tip, hg, ag) {
-  if (!tip || hg == null || ag == null) return null;
-  const [th, ta] = String(tip.h != null ? tip.h + ":" + tip.a : tip).split(":").map(Number);
-  if (th === hg && ta === ag) return 3;
-  return sgn(th - ta) === sgn(hg - ag) ? 1 : 0;
+const W_OF = (h, a) => h > a ? "1" : h === a ? "X" : "2";
+const DG_W = {"1": "Heimsieg", "X": "Unentschieden", "2": "Auswärtssieg"};
+const DG_OU = {"O": "Über 2.5", "U": "Unter 2.5"};
+function botTip(g) {
+  const [h, a] = String(g.bot || "").split(":").map(Number);
+  return {w: g.bot_w || (isNaN(h) ? null : W_OF(h, a)), ou: g.bot_ou || (isNaN(h) ? null : h + a > 2.5 ? "O" : "U"), h, a};
+}
+function dgPts(t, hg, ag) {                 // {w, ou, cs, total} oder null
+  if (!t || hg == null || ag == null) return null;
+  const w = t.w ? (t.w === W_OF(hg, ag) ? 1 : 0) : null;
+  const ou = t.ou ? ((t.ou === "O") === (hg + ag > 2.5) ? 1 : 0) : null;
+  const cs = t.h != null && !isNaN(t.h) ? (t.h === hg && t.a === ag ? 3 : 0) : null;
+  return {w, ou, cs, total: (w || 0) + (ou || 0) + (cs || 0)};
 }
 let dgDraft = null, dgEdit = false;
 function dgScore() {
-  let me = 0, botp = 0, n = 0;
-  (D.daygame || []).forEach(g => { if (g.status !== "done") return; n++;
-    botp += dgPoints(g.bot, g.hg, g.ag) || 0;
-    const t = dgGet(g.day); if (t) me += dgPoints(t, g.hg, g.ag) || 0; });
-  return {me, botp, n};
+  let me = 0, botp = 0;
+  (D.daygame || []).forEach(g => { if (g.status !== "done") return;
+    botp += dgPts(botTip(g), g.hg, g.ag).total;
+    const t = dgGet(g.day); if (t) me += dgPts(t, g.hg, g.ag).total; });
+  return {me, botp};
 }
 function dayGameCard() {
   const day = todayLocal();
@@ -437,20 +458,27 @@ function dayGameCard() {
   let body;
   if (g.status === "void") body = '<div class="note" style="text-align:center">Das Spiel wurde abgesagt und zählt nicht.</div>';
   else if (!started && (!tip || dgEdit)) {
-    dgDraft = dgDraft || (tip ? {h: tip.h, a: tip.a} : {h: 1, a: 1});
-    const step = (k) => `<div class="stp"><button data-dg="${k}-">−</button><b class="num">${dgDraft[k]}</b><button data-dg="${k}+">+</button></div>`;
-    body = `<div class="dgin">${step("h")}<span class="colon">:</span>${step("a")}</div>
-      <div style="text-align:center"><button class="btn" data-dg="save">${tip ? "Tipp ändern" : "Tipp abgeben"}</button></div>
-      <div class="note" style="text-align:center">🤖 Der Bot hat schon getippt. Sein Tipp wird sichtbar, sobald du getippt hast.</div>`;
+    dgDraft = dgDraft || (tip ? {w: tip.w || null, ou: tip.ou || null, h: tip.h, a: tip.a} : {w: null, ou: null, h: 1, a: 1});
+    const opt = (k, v, lbl) => `<button class="${dgDraft[k] === v ? "on" : ""}" data-dg="${k}=${v}">${lbl}</button>`;
+    const step = k => `<div class="stp"><button data-dg="${k}-">−</button><b class="num">${dgDraft[k]}</b><button data-dg="${k}+">+</button></div>`;
+    const ready = dgDraft.w && dgDraft.ou;
+    body = `<div class="dgq"><div class="dgl">Sieger <small>+1</small></div><div class="seg dgseg">${opt("w", "1", esc(g.home))}${opt("w", "X", "Unentschieden")}${opt("w", "2", esc(g.away))}</div></div>
+      <div class="dgq"><div class="dgl">Tore <small>+1</small></div><div class="seg dgseg">${opt("ou", "O", "Über 2.5")}${opt("ou", "U", "Unter 2.5")}</div></div>
+      <div class="dgq"><div class="dgl">Genaues Resultat <small>+3</small></div><div class="dgin">${step("h")}<span class="colon">:</span>${step("a")}</div></div>
+      <div style="text-align:center"><button class="btn" data-dg="save" ${ready ? "" : "disabled"}>${tip ? "Tipps ändern" : "Tipps abgeben"}</button></div>
+      <div class="note" style="text-align:center">${ready ? "" : "Wähle Sieger und Tore. "}🤖 Der Bot hat schon getippt. Seine Tipps werden sichtbar, sobald du getippt hast.</div>`;
   } else {
-    const row = (who, t, cls2) => {
-      const p = res ? dgPoints(t, res[0], res[1]) : null;
-      const pts = t == null ? "" : p == null ? "" : `<span class="badge ${p ? "won" : "lost"}">${g.status === "done" ? "" : "jetzt "}+${p}</span>`;
-      return `<div class="dgrow ${cls2}"><span>${who}</span><b class="num">${t == null ? "kein Tipp" : esc(typeof t === "string" ? t : t.h + ":" + t.a)}</b>${pts}</div>`;
-    };
-    body = `<div class="dgres">${row("Du", tip, "me")}${row("🤖 Bot", g.bot, "bt")}</div>` +
-      (!started && tip ? `<div style="text-align:center"><button class="link" data-dg="edit">Tipp ändern (bis Anpfiff)</button></div>` : "") +
-      (g.status === "done" ? `<div class="note" style="text-align:center">${dgVerdict(dgPoints(tip, g.hg, g.ag), dgPoints(g.bot, g.hg, g.ag))}</div>` : "");
+    const b = botTip(g);
+    const pm = tip && res ? dgPts(tip, res[0], res[1]) : null, pb = res ? dgPts(b, res[0], res[1]) : null;
+    const pt = (p, k, max) => p == null || p[k] == null ? "" : `<span class="badge ${p[k] ? "won" : "lost"}">+${p[k]}</span>`;
+    const cell = (t, k) => t == null || t[k] == null || (k === "h" && isNaN(t.h)) ? "–" : k === "w" ? esc(t.w === "X" ? "X" : t.w === "1" ? g.home : g.away) : k === "ou" ? DG_OU[t.ou] : t.h + ":" + t.a;
+    const line = (lbl, k, pk) => `<tr><td>${lbl}</td><td><b>${cell(tip, k)}</b> ${pt(pm, pk)}</td><td><b>${cell(b, k)}</b> ${pt(pb, pk)}</td></tr>`;
+    const tot = (p) => p ? `<b class="num">${p.total}</b> ${g.status === "done" ? "Punkte" : "jetzt"}` : "";
+    body = `<table class="dgt"><thead><tr><th></th><th>Du</th><th>🤖 Bot</th></tr></thead><tbody>
+      ${line("Sieger", "w", "w")}${line("Tore", "ou", "ou")}${line("Resultat", "h", "cs")}
+      ${res ? `<tr class="sum"><td>Total</td><td>${tip ? tot(pm) : "–"}</td><td>${tot(pb)}</td></tr>` : ""}</tbody></table>` +
+      (!started && tip ? `<div style="text-align:center"><button class="link" data-dg="edit">Tipps ändern (bis Anpfiff)</button></div>` : "") +
+      (g.status === "done" ? `<div class="note" style="text-align:center">${dgVerdict(pm && pm.total, pb.total)}</div>` : "");
   }
   return `<div class="card dg">${head}${teams}${body}${foot}</div>`;
 }
@@ -463,8 +491,8 @@ function dgHistory() {
   if (!rows.length) return '<div class="note">Noch keine früheren Tage.</div>';
   return `<div class="scroll" style="padding:0;margin-top:8px"><table><thead><tr><th>Tag</th><th>Spiel</th><th>Ende</th><th>Du</th><th>Bot</th></tr></thead><tbody>` +
     rows.map(g => { const t = dgGet(g.day), done = g.status === "done";
-      const cell = (tp) => tp == null ? "–" : `${esc(typeof tp === "string" ? tp : tp.h + ":" + tp.a)}${done ? ` <small>+${dgPoints(tp, g.hg, g.ag)}</small>` : ""}`;
-      return `<tr><td>${g.day.slice(8)}.${g.day.slice(5, 7)}.</td><td>${pair(g.home, g.away, 14)}</td><td>${done ? g.hg + ":" + g.ag : g.status === "void" ? "abgesagt" : "offen"}</td><td>${cell(t)}</td><td>${cell(g.bot)}</td></tr>`; }).join("") +
+      const p = (tp) => !done ? "" : tp ? dgPts(tp, g.hg, g.ag).total : "–";
+      return `<tr><td>${g.day.slice(8)}.${g.day.slice(5, 7)}.</td><td>${pair(g.home, g.away, 14)}</td><td>${done ? g.hg + ":" + g.ag : g.status === "void" ? "abgesagt" : "offen"}</td><td><b>${p(t)}</b></td><td><b>${p(botTip(g))}</b></td></tr>`; }).join("") +
     "</tbody></table></div>";
 }
 function dgClick(act) {
@@ -472,12 +500,13 @@ function dgClick(act) {
   if (act === "hist") state.dgHist = !state.dgHist;
   else if (act === "edit") { dgEdit = true; dgDraft = null; }
   else if (/^[ha][+-]$/.test(act)) { dgDraft[act[0]] = Math.max(0, Math.min(9, dgDraft[act[0]] + (act[1] === "+" ? 1 : -1))); }
+  else if (/^(w|ou)=/.test(act)) { const [k, v] = act.split("="); dgDraft[k] = v; }
   else if (act === "save" && g) {
     if (Date.now() >= Date.parse(g.utc)) alert("Das Spiel hat schon begonnen, Tipps sind gesperrt.");
-    else { dgSet(day, {h: dgDraft.h, a: dgDraft.a, at: new Date().toISOString(), id: g.id}); dgEdit = false; }
+    else if (dgDraft.w && dgDraft.ou) { dgSet(day, {w: dgDraft.w, ou: dgDraft.ou, h: dgDraft.h, a: dgDraft.a, at: new Date().toISOString(), id: g.id}); dgEdit = false; }
   }
   const y = window.scrollY; $("#view").innerHTML = VIEWS[state.tab](); window.scrollTo(0, y);
-  if (act === "save") { const c = document.querySelector(".dg .dgres"); if (c && !REDUCED) c.classList.add("reveal"); }
+  if (act === "save") { const c = document.querySelector(".dg .dgt"); if (c && !REDUCED) c.classList.add("reveal"); }
 }
 
 function tips() {
