@@ -175,6 +175,8 @@ h2{font-size:13px;font-weight:700;color:var(--mute);text-transform:uppercase;let
 .stp{display:flex;align-items:center;gap:10px;background:var(--card2);border-radius:14px;padding:6px}
 .stp b{font-size:28px;font-weight:800;min-width:26px;text-align:center}
 .stp button{font:inherit;font-size:20px;font-weight:700;width:38px;height:38px;border-radius:10px;border:0;background:var(--card);color:var(--fg);box-shadow:var(--shadow);cursor:pointer}
+.seg .cnt{display:inline-block;min-width:18px;padding:0 5px;margin-left:4px;border-radius:999px;background:var(--line);font-size:11px;font-weight:800;color:var(--mute)}
+.seg button.on .cnt{background:var(--accsoft);color:var(--acc)}
 .dgq{margin:10px 0 4px}
 .dgl{font-size:12px;font-weight:700;color:var(--mute);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;text-align:center}
 .dgl small{color:var(--acc);font-weight:800}
@@ -267,7 +269,7 @@ const badge = s => `<span class="badge ${BADGE[s] || ""}">${STATUS[s] || s}</spa
 let store = {}; try { store = window.localStorage; } catch (e) {}
 const get = (k, d) => { try { return store.getItem(k) || d; } catch (e) { return d; } };
 const set = (k, v) => { try { store.setItem(k, v); } catch (e) {} };
-let state = {league: get("league","ALL"), tab: (location.hash || "").slice(1) || "tips", kind: "ALL", only: get("only","0") === "1"};
+let state = {view: get("view", "all"), league: get("league","ALL"), tab: (location.hash || "").slice(1) || "tips", kind: "ALL", only: get("only","0") === "1"};
 if (state.league !== "ALL" && !D.leagues[state.league]) state.league = "ALL";
 if (!TABS.some(t => t[0] === state.tab)) state.tab = "tips";
 const inLeague = r => state.league === "ALL" || r.league === state.league;
@@ -743,11 +745,16 @@ function chart(pts) {
 }
 
 // ---------- Wetten ----------
+function statusSeg(nRun, nOpen) {
+  const b = (v, lbl) => `<button data-view="${v}" class="${(state.view || "all") === v ? "on" : ""}">${lbl}</button>`;
+  return `<div class="seg">${b("all", "Alle")}${b("live", `🔴 Laufend <small class="cnt">${nRun}</small>`)}${b("open", `Offen <small class="cnt">${nOpen}</small>`)}</div>`;
+}
+
 function wetten() {
   const kinds = ["ALL", "1X2", "SCORE", "OU", "BOTD"];
   const seg = '<div class="seg">' + kinds.map(k => `<button data-kind="${k}" class="${state.kind === k ? "on" : ""}">${k === "ALL" ? "Alle" : KIND[k]}</button>`).join("") + "</div>";
   const rows = D.bets.filter(r => inLeague(r) && (state.kind === "ALL" || r.kind === state.kind));
-  if (!rows.length) return seg + '<div class="card empty">Noch keine Wetten.</div>';
+  if (!rows.length) return statusSeg(0, 0) + seg + '<div class="card empty">Noch keine Wetten.</div>';
   const right = r => (r.status === "OPEN" ? "" : `<b class="${cls(r.profit)} num">${chf(r.profit || 0)}</b><br>`) + badge(r.status);
   // Einzelwetten pro Spiel zusammenfassen
   const cards = [], byMatch = {};
@@ -760,8 +767,14 @@ function wetten() {
   // Reihenfolge: laufende Spiele zuerst, dann kommende nach Anpfiff, dann abgerechnete (neueste zuerst)
   const isOpen = c => c.match ? c.bets.some(b => b.status === "OPEN") : c.status === "OPEN";
   const isLive = c => isOpen(c) && (c.match ? !!liveOf(c.league, c.utc, c.home, c.away) : c.legs.some(l => l.state === "OPEN" && liveOf(l.league, l.utc, l.home, l.away)));
-  const rank = c => isLive(c) ? 0 : isOpen(c) ? 1 : 2;
+  // "Laufend": angepfiffen und noch nicht abgerechnet (Live-Stand oder Anpfiff vor weniger als 3 Std.)
+  const started = (utc) => { const t = Date.parse(utc); return t <= Date.now() && Date.now() - t < 3 * 3600e3; };
+  const running = c => isOpen(c) && (isLive(c) || (c.match ? started(c.utc) : c.legs.some(l => l.state === "OPEN" && started(l.utc))));
+  const rank = c => running(c) ? 0 : isOpen(c) ? 1 : 2;
   cards.sort((x, y) => rank(x) - rank(y) || (rank(x) === 1 ? x.utc.localeCompare(y.utc) : y.utc.localeCompare(x.utc)));
+  const nRun = cards.filter(running).length, nOpen = cards.filter(isOpen).length;
+  const view = state.view === "live" ? cards.filter(running) : state.view === "open" ? cards.filter(isOpen) : cards;
+  const segs = statusSeg(nRun, nOpen) + seg;
   // Live-Zusammenfassung
   let nLive = 0, nOk = 0, nBad = 0, pot = 0;
   cards.forEach(c => { if (!c.match) return; const ev = liveOf(c.league, c.utc, c.home, c.away); if (!ev) return;
@@ -770,7 +783,8 @@ function wetten() {
   if (nLive) top = `<div class="card hero"><div class="lbl">🔴 Live</div><div class="big num">${chf(pot)} CHF</div>
     <div class="row2"><span>Gewinn, wenn es so bleibt</span><span><b>${nOk}</b> gehen auf</span><span><b>${nBad}</b> gehen nicht auf</span></div></div>`;
   else if (LIVE.ok === false) top = '<div class="note">Live-Resultate sind gerade nicht erreichbar.</div>';
-  return seg + top + cards.map(c => {
+  if (!view.length) return segs + top + `<div class="card empty">${state.view === "live" ? "⚽ Gerade läuft kein Spiel mit einer offenen Wette." : "Keine offenen Wetten."}</div>`;
+  return segs + top + view.map(c => {
     if (!c.match) return `<div class="card star"><div class="bet"><div class="l"><div class="kicker">⭐ Bet of the day</div>
         <div class="t">Kombi @${c.odds.toFixed(2)}</div><div class="s">${dt(c.utc)} · Einsatz ${c.stake.toFixed(2)} CHF</div></div>
         <div class="r">${right(c)}</div></div>${legList(c.legs)}${comboLive(c.legs, c.stake, c.odds, c.status === "OPEN")}</div>`;
@@ -936,6 +950,8 @@ $("#view").addEventListener("click", e => {
   if (e.target.closest("#hist-more")) { state.histAll = true; const y = window.scrollY; $("#view").innerHTML = VIEWS[state.tab](); window.scrollTo(0, y); return; }
   const o = e.target.closest("button[data-only]");
   if (o) { state.only = o.dataset.only === "1"; set("only", state.only ? "1" : "0"); render(); return; }
+  const vw = e.target.closest("button[data-view]");
+  if (vw) { state.view = vw.dataset.view; set("view", state.view); render(); return; }
   const b = e.target.closest("button[data-kind]"); if (!b) return; state.kind = b.dataset.kind; render(); });
 $("#stand").textContent = "Stand " + new Date(D.generated).toLocaleString("de-CH", {timeZone: "Europe/Zurich", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"}) + " · Fake-Geld";
 render();
