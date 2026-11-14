@@ -461,6 +461,8 @@ def main():
                     help="neuer Multiplikator-Versuch: Ziel")
     ap.add_argument("--multi-days", type=float, default=_env_num("MULTI_DAYS"),
                     help="neuer Multiplikator-Versuch: Dauer in Tagen")
+    ap.add_argument("--regen", choices=["duel", "multi"], default=(os.environ.get("REGEN") or None),
+                    help="offene Wette verwerfen und neu generieren (duel oder multi)")
     args = ap.parse_args()
 
     con = sqlite3.connect(bot.DB_PATH)
@@ -498,6 +500,11 @@ def main():
         botd_text = build_botd_text(botd, botd_record(con))
         print("\n" + build_botd_text(botd, botd_record(con), emoji=False))
 
+    regen_text = None
+    if args.regen:                       # Knopf "Neue Wette generieren" im Dashboard
+        regen_text = (duel if args.regen == "duel" else multi).regenerate(con)
+        print("\n" + regen_text)
+
     dg = daygame.pick(con)
     if dg:
         print(f"\nTagesduell: Spiel des Tages gewaehlt (Bot tippt {dg['bot_score']})")
@@ -520,7 +527,7 @@ def main():
 
     if args.no_telegram:
         pass
-    elif not results and not placed and botd is None and not multi_text and not duel_text:
+    elif not results and not placed and botd is None and not multi_text and not duel_text and not regen_text:
         print("\nTelegram: nichts Neues, keine Nachricht gesendet")
     else:
         parts = []
@@ -530,6 +537,8 @@ def main():
             parts.append(multi_text)
         if duel_text:
             parts.append(duel_text)
+        if regen_text:
+            parts.append(regen_text)
         if results:
             parts.append(build_report(results, acc, emoji=True))
         if placed:

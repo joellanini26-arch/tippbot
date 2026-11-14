@@ -254,6 +254,7 @@ def main():
     duel_data = duel.duel_json(con)
     data["duel"] = duel_data["challenge"]
     data["duel_partner"] = duel.PARTNER_URL
+    data["duel_replaced"] = duel.replaced_count(con)
     data["espn_names"] = duel.ESPN_NAMES          # fuer die Live-Resultate im Browser
     data["crests"] = crest_map(con)
     con.close()

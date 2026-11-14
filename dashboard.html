@@ -179,6 +179,11 @@ h2{font-size:13px;font-weight:700;color:var(--mute);text-transform:uppercase;let
 .stp button{font:inherit;font-size:20px;font-weight:700;width:38px;height:38px;border-radius:10px;border:0;background:var(--card);color:var(--fg);box-shadow:var(--shadow);cursor:pointer}
 .seg .cnt{display:inline-block;min-width:18px;padding:0 5px;margin-left:4px;border-radius:999px;background:var(--line);font-size:11px;font-weight:800;color:var(--mute)}
 .seg button.on .cnt{background:var(--accsoft);color:var(--acc)}
+.regen{margin-top:12px;text-align:center}
+.regen .note{margin:6px 0 0}
+.btn.ghost{background:var(--card2);color:var(--fg);box-shadow:none;border:1px solid var(--line)}
+.card.replaced{opacity:.6;box-shadow:none}
+.card.replaced .s{white-space:normal}
 .dgq{margin:10px 0 4px}
 .dgl{font-size:12px;font-weight:700;color:var(--mute);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;text-align:center}
 .dgl small{color:var(--acc);font-weight:800}
@@ -285,7 +290,7 @@ const TABS = [["tips","Tipps"],["duell","Duell"],["multi","Multi"],["konto","Kon
 const KIND = {"1X2":"Tipp","SCORE":"Resultat","OU":"Over/Under","BOTD":"Bet of the day"};
 const PICKS = {"1":"Heimsieg","2":"Auswärtssieg","X":"Unentschieden","1X":"Heimsieg oder Unentschieden","X2":"Auswärtssieg oder Unentschieden"};
 const pickLabel = p => p.startsWith("Over") ? "Über " + p.split(" ")[1] + " Tore" : p.startsWith("Under") ? "Unter " + p.split(" ")[1] + " Tore" : (PICKS[p] || p);
-const STATUS = {OPEN:"offen",WON:"gewonnen",LOST:"verloren",VOID:"storniert",CANCELLED:"verfallen"};
+const STATUS = {OPEN:"offen",WON:"gewonnen",LOST:"verloren",VOID:"storniert",CANCELLED:"verfallen",REPLACED:"ersetzt"};
 const BADGE = {OPEN:"open",WON:"won",LOST:"lost"};
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -678,6 +683,8 @@ const RUNSTATUS = {ACTIVE: "läuft", REACHED: "Ziel erreicht 🏆", LOST: "verlo
 let multiMsg = "";
 
 function multiBetCard(b, i) {
+  if (b.status === "REPLACED") return `<div class="card replaced"><div class="bet"><div class="l"><div class="kicker">Verworfen</div><div class="t">Kombi @${b.odds.toFixed(2)} · ${pct(b.prob)}</div>
+    <div class="s">${b.legs.map(l => esc(l.home) + " – " + esc(l.away) + ": " + esc(pickLabel(l.pick))).join(" · ")}</div></div><div class="r"><span class="badge">🔄 ersetzt</span></div></div></div>`;
   const open = b.status === "OPEN";
   const res = open || b.status === "CANCELLED" ? badge(b.status) : `<b class="${cls(b.profit)} num">${chf(b.profit || 0)} Fr.</b>`;
   const after = b.pot_after != null ? ` → Topf <b>${fr(b.pot_after)}</b>` : open ? ` → bei Treffer <b>${fr(b.stake * b.odds)}</b>` : "";
@@ -685,7 +692,7 @@ function multiBetCard(b, i) {
   return `<div class="card${open ? " star" : ""}">
     <div class="bet"><div class="l"><div class="kicker">Stufe ${i + 1}</div><div class="t">Kombi @${b.odds.toFixed(2)} · ${pct(b.prob)}</div>
     <div class="s">Einsatz ${fr(b.stake)} Fr.${after}</div></div><div class="r">${res}</div></div>
-    ${legList(b.legs)}${comboLive(b.legs, b.stake, b.odds, open)}${saved}</div>`;
+    ${legList(b.legs)}${comboLive(b.legs, b.stake, b.odds, open)}${saved}${open ? regenBox("multi", b.legs.map(l => l.utc)) : ""}</div>`;
 }
 
 function multi() {
@@ -715,7 +722,7 @@ function multi() {
       h += `<div class="note">Bei rund 45 % Trefferchance pro Kombi liegt die Chance, das Ziel zu erreichen, bei etwa ${cur.chance >= 0.01 ? Math.round(cur.chance * 100) + " %" : "1 zu " + Math.round(1 / cur.chance).toLocaleString("de-CH")}.</div>`;
     if (cur.status === "ACTIVE" && !cur.bets.some(b => b.status === "OPEN"))
       h += '<div class="card empty">Gerade keine Kombi offen. Der Bot sucht stündlich nach Spielen in den nächsten 36 Stunden, die eine Kombi um 2.0 ergeben.</div>';
-    const bets = cur.bets.map(multiBetCard).reverse();
+    const bets = cur.bets.map((b, i, arr) => multiBetCard(b, arr.slice(0, i + 1).filter(x => x.status !== "REPLACED").length - 1)).reverse();
     if (bets.length) h += "<h2>Kombis in diesem Versuch</h2>" + bets.join("");
   }
   const d = M.defaults || {start: 100, target: 5000, days: 28};
@@ -749,19 +756,39 @@ async function startMulti() {
   if (!(s > 0) || !(t > s) || !(d > 0)) return msg("Bitte gültige Werte eingeben: Ziel muss grösser als das Startkapital sein, Dauer mindestens 1 Tag.");
   const active = (D.multi.runs || []).some(r => r.status === "ACTIVE");
   if (!confirm(`Neuer Versuch: ${fr(s)} Fr. → ${fr(t)} Fr. in ${d} Tagen.` + (active ? "\nDer laufende Versuch wird abgebrochen." : "") + "\nStarten?")) return;
+  const btn = $("#m-go"); btn.disabled = true;
+  await dispatchBot({multi_start: String(s), multi_target: String(t), multi_days: String(d)}, msg, "Der neue Versuch erscheint");
+  btn.disabled = false;
+}
+
+// Startet den Bot auf GitHub mit Eingaben (braucht ein Token mit "Actions: Read and write")
+async function dispatchBot(inputs, msg, what) {
   const tok = get("gh_token", "") || askToken();
   if (!tok) return msg("Ohne GitHub-Token kann das Dashboard den Bot nicht starten.");
-  const btn = $("#m-go"); btn.disabled = true; msg("Wird gestartet …");
+  msg("Wird gestartet …");
   try {
     const r = await fetch(`https://api.github.com/repos/${D.repo}/actions/workflows/tippbot.yml/dispatches`, {
       method: "POST",
       headers: {Authorization: "Bearer " + tok, Accept: "application/vnd.github+json"},
-      body: JSON.stringify({ref: "main", inputs: {multi_start: String(s), multi_target: String(t), multi_days: String(d)}})});
-    if (r.status === 204) msg("Gestartet. Der neue Versuch erscheint in etwa 2 bis 5 Minuten (Seite neu laden).");
+      body: JSON.stringify({ref: "main", inputs})});
+    if (r.status === 204) msg(`Gestartet. ${what} in etwa 2 bis 5 Minuten (Seite neu laden).`);
     else if (r.status === 401 || r.status === 403 || r.status === 404) { set("gh_token", ""); msg(`GitHub hat den Start abgelehnt (${r.status}). Das Token fehlt, ist abgelaufen oder hat nicht die Berechtigung „Actions: Read and write“ für dieses Repository. Beim nächsten Klick wird es neu abgefragt.`); }
     else msg("Fehler beim Starten: " + r.status + " " + (await r.text()).slice(0, 200));
   } catch (e) { msg("Keine Verbindung zu GitHub: " + e.message); }
-  btn.disabled = false;
+}
+
+// Knopf "Neue Wette generieren" (Duell und Multiplikator)
+const REGEN_MSG = {};
+const canRegen = kickoffs => kickoffs.length && kickoffs.every(k => Date.parse(k) > Date.now() + 15 * 60e3);
+const regenBox = (which, kickoffs) => !canRegen(kickoffs) ? "" : `<div class="regen"><button class="btn ghost" data-regen="${which}">🔄 Neue Wette generieren</button>
+  <div class="note" id="regen-${which}">${esc(REGEN_MSG[which] || "Nicht zufrieden? Der Bot verwirft diese Wette und wählt die nächstbeste. Geht bis kurz vor dem ersten Anpfiff.")}</div></div>`;
+async function regen(which) {
+  const label = which === "duel" ? "die offene Duell-Wette" : "die offene Multiplikator-Kombi";
+  if (!confirm(`Soll der Bot ${label} verwerfen und eine neue wählen?`)) return;
+  const msg = x => { REGEN_MSG[which] = x; const e = $("#regen-" + which); if (e) e.textContent = x; };
+  const btn = document.querySelector(`[data-regen="${which}"]`); if (btn) btn.disabled = true;
+  await dispatchBot({regen: which}, msg, "Die neue Wette erscheint");
+  if (btn) btn.disabled = false;
 }
 
 // ---------- Konto ----------
@@ -970,7 +997,7 @@ function duelBet(b, i) {
   const box = b.status !== "open" ? "" : `<div class="livebox">${anyLive ? (lv.some(x => x.ok === false) ? stateTag(false) : lv.every(x => x.ok === true) ? stateTag(true) : '<span class="badge open">⏳ läuft, noch offen</span>') : "<small>Auszahlung bei Treffer</small>"}<b class="num">${fr(b.stake * b.odds)} CHF</b></div>`;
   return `<div class="card${b.status === "open" ? " star" : ""}"><div class="bet"><div class="l"><div class="kicker">Wette ${i + 1} · ${b.legs.length === 1 ? "Einzelwette" : "Kombi"}</div>
     <div class="t">Einsatz ${fr(b.stake)} CHF @${b.odds.toFixed(2)}</div><div class="s">Chance laut Modell ${pct(b.probability)} · gesetzt ${dt(b.placed)}</div></div>
-    <div class="r">${res}</div></div><div class="legs">${legs}</div>${box}</div>`;
+    <div class="r">${res}</div></div><div class="legs">${legs}</div>${box}${b.status === "open" ? regenBox("duel", b.legs.map(l => l.kickoff)) : ""}</div>`;
 }
 
 function duell() {
@@ -989,6 +1016,7 @@ function duell() {
       ${m("Versuche", atts.length)}
       ${m("Höchststand dieser Versuch", fr(cur.peak) + " CHF")}
       ${m("Bester Versuch je", fr(best) + " CHF")}
+      ${D.duel_replaced ? m("Neu generiert", D.duel_replaced + "×") : ""}
       </div>`;
     if (!cur.bets.length || cur.bets[cur.bets.length - 1].status !== "open")
       h += '<div class="card empty">Gerade keine Wette offen. Der Bot sucht stündlich nach Spielen in den nächsten 36 Stunden mit einer Gesamtquote von 1.85 bis 2.30.</div>';
@@ -1076,6 +1104,8 @@ $("#lg").value = state.league;
 $("#lg").addEventListener("change", e => { state.league = e.target.value; set("league", state.league); render(); });
 $("#tabs").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; state.tab = b.dataset.tab; history.replaceState(null, "", "#" + state.tab); render(); window.scrollTo(0, 0); });
 $("#view").addEventListener("click", e => {
+  const rg = e.target.closest("[data-regen]");
+  if (rg) { regen(rg.dataset.regen); return; }
   const gm = e.target.closest("[data-g]");
   if (gm && !e.target.closest("button")) { const [l, u, h, a] = gm.dataset.g.split("|"); openGame(l, u, h, a); return; }
   if (e.target.closest("#m-go")) return startMulti();

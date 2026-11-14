@@ -189,6 +189,8 @@ def place(con, now=None):
     if con.execute("SELECT 1 FROM duel_bets WHERE status='open'").fetchone():
         return None
     n, bank = open_attempt(con, now)
+    rejected = rejected_legs(con, "SELECT l.match_id, l.pick FROM duel_legs l JOIN duel_bets b ON b.id=l.bet_id "
+                                  "WHERE b.status='replaced' AND b.attempt=?", (n,))
     earliest = now + timedelta(minutes=MIN_LEAD_MINUTES)
     horizon = now + timedelta(hours=LOOKAHEAD_HOURS)
     pool = []
@@ -213,7 +215,7 @@ def place(con, now=None):
             p = bot.predict(model, home, away)
             h, a = espn(home), espn(away)
             for pick, label, prob in candidates(p, h, a):
-                if prob < 0.05 or prob > 0.97:
+                if prob < 0.05 or prob > 0.97 or (mid, pick) in rejected:
                     continue
                 pool.append({"match_id": mid, "kickoff": kickoff_iso(d), "competition": name,
                              "home": h, "away": a, "pick": pick, "label": label, "prob": prob,
@@ -248,6 +250,38 @@ def place(con, now=None):
     return {"attempt": n, "stake": round(bank, 2), "odds": odds, "prob": best_prob, "legs": legs}
 
 
+# ---------- Neue Wette generieren (Knopf im Dashboard) ----------
+def rejected_legs(con, sql, args):
+    """Tipps (Spiel, Markt), die in diesem Versuch schon verworfen wurden: nicht nochmals waehlen."""
+    return {(mid, pick) for mid, pick in con.execute(sql, args)}
+
+
+def regenerate(con, now=None):
+    """Verwirft die offene Wette (nur vor dem ersten Anpfiff) und setzt die naechstbeste.
+    Die alte bleibt mit Status 'replaced' gespeichert, erscheint aber nicht in duel.json.
+    Gibt einen Text fuer Log/Telegram zurueck."""
+    now = now or _now()
+    row = con.execute("SELECT id FROM duel_bets WHERE status='open'").fetchone()
+    if not row:
+        return "Tippduell: keine offene Wette zum Ersetzen."
+    bid = row[0]
+    first = min(bot.parse_date(k) for (k,) in con.execute("SELECT kickoff FROM duel_legs WHERE bet_id=?", (bid,)))
+    if first <= now + timedelta(minutes=MIN_LEAD_MINUTES):
+        return "Tippduell: Wette nicht ersetzt, das erste Spiel beginnt zu bald oder laeuft schon."
+    con.execute("UPDATE duel_bets SET status='replaced', settled=? WHERE id=?", (iso(now), bid))
+    con.commit()
+    new = place(con, now)
+    if not new:                                   # keine Alternative: alte Wette wiederherstellen
+        con.execute("UPDATE duel_bets SET status='open', settled=NULL WHERE id=?", (bid,))
+        con.commit()
+        return "Tippduell: keine andere passende Wette gefunden, die bisherige bleibt."
+    return "🔄 Tippduell: Wette neu generiert.\n" + build_text(new, [])
+
+
+def replaced_count(con):
+    return con.execute("SELECT COUNT(*) FROM duel_bets WHERE status='replaced'").fetchone()[0]
+
+
 # ---------- Export ----------
 def challenge(con):
     attempts = []
@@ -256,7 +290,7 @@ def challenge(con):
         bets = []
         for bid, placed, stake, odds, prob, bstatus, payout in con.execute(
                 "SELECT id, placed, stake, odds, probability, status, payout FROM duel_bets "
-                "WHERE attempt=? ORDER BY id", (n,)).fetchall():
+                "WHERE attempt=? AND status != 'replaced' ORDER BY id", (n,)).fetchall():
             legs = [{"kickoff": k, "competition": c, "home": h, "away": a, "pick": pk, "label": lb,
                      "odds": float(o), "status": st, "score": sc}
                     for k, c, h, a, pk, lb, o, st, sc in con.execute(

@@ -201,6 +201,9 @@ def place(con, now=None):
         return None
     ends = bot.parse_date(run["ends_at"])
     horizon = min(now + timedelta(hours=LOOKAHEAD_HOURS), ends)
+    rejected = {(mid, pick) for mid, pick in con.execute(
+        "SELECT l.match_id, l.pick FROM multi_legs l JOIN multi_bets b ON b.id=l.bet_id "
+        "WHERE b.status='REPLACED' AND b.run_id=?", (rid,))}
     earliest = now + timedelta(minutes=MIN_LEAD_MINUTES)
 
     pool = []
@@ -225,7 +228,7 @@ def place(con, now=None):
                 continue
             p = bot.predict(model, home, away)
             for pick, prob in paper.botd_candidates(p):
-                if prob >= LEG_MIN_PROB:
+                if prob >= LEG_MIN_PROB and (mid, pick) not in rejected:
                     pool.append({"match_id": mid, "league": name, "home": home, "away": away, "utc": d,
                                  "pick": pick, "prob": prob, "odds": paper.make_odds(prob, MARGIN)})
 
@@ -254,6 +257,30 @@ def place(con, now=None):
     return {"id": cur.lastrowid, "stake": stake, "odds": best_odds, "prob": best_prob, "legs": legs,
             "savings": run["savings"], "target": run["target"], "streak": run["streak"],
             "ends_at": run["ends_at"]}
+
+
+# ---------- Neue Wette generieren (Knopf im Dashboard) ----------
+def regenerate(con, now=None):
+    """Verwirft die offene Kombi des laufenden Versuchs (nur vor dem ersten Anpfiff) und setzt die
+    naechstbeste. Die alte bleibt mit Status REPLACED gespeichert. Gibt einen Text zurueck."""
+    now = now or _now()
+    rid = active_run(con)
+    row = rid and con.execute("SELECT id FROM multi_bets WHERE run_id=? AND status='OPEN'", (rid,)).fetchone()
+    if not row:
+        return "Multiplikator: keine offene Kombi zum Ersetzen."
+    bid = row[0]
+    first = min(bot.parse_date(u) for (u,) in con.execute(
+        "SELECT m.utc_date FROM multi_legs l JOIN matches m ON m.id=l.match_id WHERE l.bet_id=?", (bid,)))
+    if first <= now + timedelta(minutes=MIN_LEAD_MINUTES):
+        return "Multiplikator: Kombi nicht ersetzt, das erste Spiel beginnt zu bald oder laeuft schon."
+    con.execute("UPDATE multi_bets SET status='REPLACED', settled_at=? WHERE id=?", (now.isoformat(), bid))
+    con.commit()
+    new = place(con, now)
+    if not new:
+        con.execute("UPDATE multi_bets SET status='OPEN', settled_at=NULL WHERE id=?", (bid,))
+        con.commit()
+        return "Multiplikator: keine andere passende Kombi gefunden, die bisherige bleibt."
+    return "🔄 Multiplikator: Kombi neu generiert.\n" + build_text(new, [])
 
 
 # ---------- Kennzahlen ----------
