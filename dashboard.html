@@ -17,6 +17,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 :root{
+  --live:#10b981;--liveink:#047857;--livesoft:rgba(16,185,129,.13);
   --bg:#f5f6fa;--card:#ffffff;--card2:#f0f2f7;--fg:#0f172a;--mute:#64748b;--line:rgba(15,23,42,.08);
   --acc:#4f46e5;--acc2:#7c3aed;--accsoft:rgba(79,70,229,.10);--pos:#059669;--possoft:rgba(5,150,105,.12);
   --neg:#e11d48;--negsoft:rgba(225,29,72,.10);--warn:#d97706;
@@ -25,6 +26,7 @@
   --glass:rgba(245,246,250,.82);
 }
 @media (prefers-color-scheme:dark){:root{
+  --live:#34d399;--liveink:#6ee7b7;--livesoft:rgba(52,211,153,.14);
   --bg:#0b0f19;--card:#131a2a;--card2:#1a2235;--fg:#e8ecf4;--mute:#8b97ad;--line:rgba(255,255,255,.07);
   --acc:#818cf8;--acc2:#a78bfa;--accsoft:rgba(129,140,248,.14);--pos:#34d399;--possoft:rgba(52,211,153,.13);
   --neg:#fb7185;--negsoft:rgba(251,113,133,.13);--warn:#fbbf24;
@@ -204,17 +206,20 @@ details.day .chev{font-size:22px;color:var(--mute);transition:transform .2s;line
 details.day[open] .chev{transform:rotate(90deg)}
 details.day .dl{padding:0 16px 8px;border-top:1px solid var(--line)}
 details.day[open] .dl{animation:rise .3s ease both}
-.live{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:800;color:#fff;background:#dc2626;border-radius:999px;padding:2px 9px;white-space:nowrap;font-variant-numeric:tabular-nums;vertical-align:middle;box-shadow:0 2px 8px rgba(220,38,38,.35)}
-.live::before{content:"";width:7px;height:7px;border-radius:50%;background:#fff;animation:pulse 1.4s infinite}
-.live.end{color:var(--fg);background:var(--card2);box-shadow:none}.live.end::before{display:none}
-.card.livecard{border:1.5px solid #dc2626;box-shadow:0 0 0 4px rgba(220,38,38,.10),var(--shadow)}
-.livepill{display:inline-flex;align-items:center;gap:7px;background:#dc2626;color:#fff;font-weight:800;font-size:12.5px;letter-spacing:.04em;border-radius:999px;padding:4px 11px;box-shadow:0 3px 10px rgba(220,38,38,.35)}
-.livepill::before{content:"";width:8px;height:8px;border-radius:50%;background:#fff;animation:pulse 1.4s infinite}
-.livepill.end{background:var(--card2);color:var(--fg);box-shadow:none}.livepill.end::before{display:none}
-.bigscore{display:inline-block;font-size:30px;font-weight:900;letter-spacing:-.02em;padding:4px 14px;border-radius:14px;background:#dc2626;color:#fff;font-variant-numeric:tabular-nums;box-shadow:0 6px 18px rgba(220,38,38,.35)}
+.live{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--liveink);background:var(--livesoft);border-radius:999px;padding:2px 9px 2px 8px;white-space:nowrap;font-variant-numeric:tabular-nums;vertical-align:middle}
+.live.end,.livepill.end{color:var(--mute);background:var(--card2)}
+.livepill{display:inline-flex;align-items:center;gap:8px;color:var(--liveink);background:var(--livesoft);font-weight:700;font-size:12px;letter-spacing:.06em;border-radius:999px;padding:4px 12px 4px 10px}
+.mk{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;font-size:12px;font-weight:900}
+.mk.ok{background:var(--livesoft);color:var(--liveink)}
+.mk.no{background:var(--card2);color:var(--mute)}
+.ldot{position:relative;flex:none;display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--live)}
+.ldot::after{content:"";position:absolute;inset:0;border-radius:50%;background:var(--live);animation:ping 1.8s cubic-bezier(0,0,.2,1) infinite}
+@keyframes ping{75%,100%{transform:scale(2.6);opacity:0}}
+.card.livecard{border:1.5px solid transparent;background:linear-gradient(var(--card),var(--card)) padding-box,linear-gradient(135deg,var(--live),var(--acc) 60%,var(--acc2)) border-box;box-shadow:0 8px 28px -10px rgba(16,185,129,.35),var(--shadow)}
+.bigscore{display:inline-block;font-size:30px;font-weight:800;letter-spacing:-.02em;padding:4px 14px;border-radius:14px;background:linear-gradient(135deg,var(--acc),var(--acc2));color:#fff;font-variant-numeric:tabular-nums;box-shadow:0 8px 20px -6px rgba(79,70,229,.45)}
 .bigscore.end{background:var(--card2);color:var(--fg);box-shadow:none}
-.bigscore.flash{animation:goal 1.2s ease}
-@keyframes goal{0%,100%{transform:scale(1)}20%{transform:scale(1.35)}40%{transform:scale(.95)}60%{transform:scale(1.12)}}
+.bigscore.flash{animation:goal 1.3s ease}
+@keyframes goal{0%,100%{transform:scale(1);box-shadow:0 8px 20px -6px rgba(79,70,229,.45)}25%{transform:scale(1.25);box-shadow:0 0 0 10px rgba(16,185,129,.25)}50%{transform:scale(.97)}70%{transform:scale(1.08)}}
 [data-g]{cursor:pointer}
 .more{font-size:12px;font-weight:700;color:var(--acc);white-space:nowrap}
 /* Statistik-Fenster */
@@ -303,11 +308,12 @@ if (!TABS.some(t => t[0] === state.tab)) state.tab = "tips";
 const inLeague = r => state.league === "ALL" || r.league === state.league;
 const oneLeague = () => state.league !== "ALL" ? state.league : Object.keys(D.leagues)[0];
 const m = (l, v, c) => `<div class="metric"><span>${l}</span><b class="${c || ""}">${v}</b></div>`;
+const OKMARK = '<b class="mk ok">✓</b>', NOMARK = '<b class="mk no">✗</b>';
 const LEGMARK = {WON: "✅", LOST: "❌", VOID: "↩️", OPEN: "⏳"};
 const legList = legs => `<div class="legs">` + legs.map(l => {
   const ev = l.state === "OPEN" ? liveOf(l.league, l.utc, l.home, l.away) : null;
   const ok = ev ? liveCheck(l.pick, ev) : null;
-  const ic = ok === true ? "🟢" : ok === false ? "🔴" : LEGMARK[l.state];
+  const ic = ok === true ? OKMARK : ok === false ? NOMARK : LEGMARK[l.state];
   return `<div class="leg"><span class="ic">${ic}</span><div>${pair(l.home, l.away, 16)}: <b>${esc(pickLabel(l.pick))}</b> ${liveTag(ev)}<br><small>${l.utc ? dt(l.utc) + " · " : ""}@${l.odds.toFixed(2)}${l.prob != null ? " · " + pct(l.prob) : ""}${l.hg != null ? " · Endstand " + l.hg + ":" + l.ag : ""}</small></div></div>`;
 }).join("") + "</div>";
 const comboLive = (legs, stake, odds, open) => {
@@ -370,9 +376,9 @@ function liveCheck(pick, ev) {         // geht die Wette beim aktuellen Spielsta
   return null;
 }
 const liveTag = ev => !ev ? "" : ev.state === "in"
-  ? `<span class="live">${esc(ev.clock)} · ${ev.hg}:${ev.ag}</span>`
+  ? `<span class="live"><i class="ldot"></i>${esc(ev.clock)} · ${ev.hg}:${ev.ag}</span>`
   : `<span class="live end">${esc(ev.detail || "Ende")} · ${ev.hg}:${ev.ag}</span>`;
-const livePill = ev => !ev ? "" : ev.state === "in" ? `<span class="livepill">LIVE ${esc(ev.clock)}</span>` : `<span class="livepill end">${esc(ev.detail || "Ende")}</span>`;
+const livePill = ev => !ev ? "" : ev.state === "in" ? `<span class="livepill"><i class="ldot"></i>LIVE ${esc(ev.clock)}</span>` : `<span class="livepill end">${esc(ev.detail || "Ende")}</span>`;
 const gattr = (league, utc, home, away) => `data-g="${esc([league, utc, home, away].join("|"))}"`;
 const LAST_SCORE = {};                 // fuer die Tor-Animation
 function bigScore(ev, key) {
@@ -872,7 +878,7 @@ function chart(pts) {
 // ---------- Wetten ----------
 function statusSeg(nRun, nOpen) {
   const b = (v, lbl) => `<button data-view="${v}" class="${(state.view || "all") === v ? "on" : ""}">${lbl}</button>`;
-  return `<div class="seg">${b("all", "Alle")}${b("live", `🔴 Laufend <small class="cnt">${nRun}</small>`)}${b("open", `Offen <small class="cnt">${nOpen}</small>`)}</div>`;
+  return `<div class="seg">${b("all", "Alle")}${b("live", `<i class="ldot" style="margin-right:6px;vertical-align:1px"></i>Laufend <small class="cnt">${nRun}</small>`)}${b("open", `Offen <small class="cnt">${nOpen}</small>`)}</div>`;
 }
 
 function wetten() {
@@ -905,7 +911,7 @@ function wetten() {
   cards.forEach(c => { if (!c.match) return; const ev = liveOf(c.league, c.utc, c.home, c.away); if (!ev) return;
     c.bets.forEach(b => { if (b.status !== "OPEN") return; nLive++; const ok = liveCheck(b.pick, ev); if (ok) { nOk++; pot += b.stake * (b.odds - 1); } else if (ok === false) nBad++; }); });
   let top = "";
-  if (nLive) top = `<div class="card hero"><div class="lbl">🔴 Live</div><div class="big num">${chf(pot)} CHF</div>
+  if (nLive) top = `<div class="card hero"><div class="lbl" style="display:flex;align-items:center;gap:8px"><i class="ldot" style="--live:#fff"></i>Live</div><div class="big num">${chf(pot)} CHF</div>
     <div class="row2"><span>Gewinn, wenn es so bleibt</span><span><b>${nOk}</b> gehen auf</span><span><b>${nBad}</b> gehen nicht auf</span></div></div>`;
   else if (LIVE.ok === false) top = '<div class="note">Live-Resultate sind gerade nicht erreichbar.</div>';
   if (!view.length) return segs + top + `<div class="card empty">${state.view === "live" ? "⚽ Gerade läuft kein Spiel mit einer offenen Wette." : "Keine offenen Wetten."}</div>`;
@@ -959,7 +965,7 @@ function duelBet(b, i) {
   const res = b.status === "open" ? badge("OPEN") : b.status === "void" ? badge("VOID")
     : `<b class="${b.status === "won" ? "pos" : "neg"} num">${b.status === "won" ? fr(b.payout) + " CHF" : "−" + fr(b.stake)}</b>`;
   const lv = b.legs.map(l => { const ev = l.status === "open" ? liveOf(l.competition, l.kickoff, l.home, l.away) : null; return {ev, ok: ev ? liveCheck(l.pick, ev) : l.status === "lost" ? false : l.status === "open" ? null : true}; });
-  const legs = b.legs.map((l, j) => `<div class="leg"><span class="ic">${lv[j].ev ? (lv[j].ok ? "🟢" : "🔴") : DUEL_ICON[l.status]}</span><div>${pair(l.home, l.away, 16)}: <b>${esc(l.label)}</b> ${liveTag(lv[j].ev)}<br><small>${dt(l.kickoff)} · ${esc(l.competition)} · @${l.odds.toFixed(2)}${l.score ? " · Endstand " + esc(l.score) : ""}</small></div></div>`).join("");
+  const legs = b.legs.map((l, j) => `<div class="leg"><span class="ic">${lv[j].ev ? (lv[j].ok ? OKMARK : NOMARK) : DUEL_ICON[l.status]}</span><div>${pair(l.home, l.away, 16)}: <b>${esc(l.label)}</b> ${liveTag(lv[j].ev)}<br><small>${dt(l.kickoff)} · ${esc(l.competition)} · @${l.odds.toFixed(2)}${l.score ? " · Endstand " + esc(l.score) : ""}</small></div></div>`).join("");
   const anyLive = lv.some(x => x.ev);
   const box = b.status !== "open" ? "" : `<div class="livebox">${anyLive ? (lv.some(x => x.ok === false) ? stateTag(false) : lv.every(x => x.ok === true) ? stateTag(true) : '<span class="badge open">⏳ läuft, noch offen</span>') : "<small>Auszahlung bei Treffer</small>"}<b class="num">${fr(b.stake * b.odds)} CHF</b></div>`;
   return `<div class="card${b.status === "open" ? " star" : ""}"><div class="bet"><div class="l"><div class="kicker">Wette ${i + 1} · ${b.legs.length === 1 ? "Einzelwette" : "Kombi"}</div>
