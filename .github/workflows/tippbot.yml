@@ -25,6 +25,10 @@ on:
         description: "Crazy Bet fuer heute mit diesem Einsatz in CHF (leer = keine)"
         required: false
         default: ""
+      crazy_swap:
+        description: "Tipp in der offenen Crazy Bet tauschen, Format Team|Tipp (z.B. Wales|Under 3.5)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -74,6 +78,7 @@ jobs:
           MULTI_DAYS: ${{ inputs.multi_days }}
           REGEN: ${{ inputs.regen }}
           CRAZY: ${{ inputs.crazy }}
+          CRAZY_SWAP: ${{ inputs.crazy_swap }}
         run: python paper.py
 
       - name: Dashboard bauen

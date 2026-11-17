@@ -355,6 +355,49 @@ def place_crazy(con, stake, now=None):
     return "\n".join(lines)
 
 
+CRAZY_PICKS = ("1", "X", "2", "1X", "X2", "12", "Over 1.5", "Under 1.5", "Over 2.5", "Under 2.5",
+               "Over 3.5", "Under 3.5")
+
+
+def swap_crazy_leg(con, team, pick, now=None):
+    """Ersetzt in der offenen Crazy Bet den Tipp beim Spiel mit diesem Team (nur vor dem Anpfiff)
+    und rechnet Gesamtquote und Chance neu. Gibt den Text fuer Log/Telegram zurueck."""
+    now = now or datetime.now(timezone.utc)
+    if pick not in CRAZY_PICKS:
+        return f"Crazy Bet: unbekannter Tipp '{pick}'."
+    row = con.execute("SELECT id, stake FROM combos WHERE kind='CRAZY' AND status='OPEN' ORDER BY id DESC").fetchone()
+    if not row:
+        return "Crazy Bet: keine offene Crazy Bet."
+    cid, stake = row
+    leg = con.execute("""SELECT l.match_id, l.pick, m.utc_date, m.league, m.home, m.away FROM combo_legs l
+                         JOIN matches m ON m.id=l.match_id WHERE l.combo_id=? AND (m.home=? OR m.away=?)""",
+                      (cid, team, team)).fetchone()
+    if not leg:
+        return f"Crazy Bet: kein Spiel mit {team} in der Kombi."
+    mid, old, utc, league, home, away = leg
+    if bot.parse_date(utc) <= now + timedelta(minutes=5):
+        return "Crazy Bet: Tausch nicht mehr moeglich, das Spiel beginnt gleich oder laeuft schon."
+    p = bot.predict(get_model(con, league), home, away)
+    prob = {"1": p["p_home"], "X": p["p_draw"], "2": p["p_away"], "1X": p["p_home"] + p["p_draw"],
+            "X2": p["p_draw"] + p["p_away"], "12": p["p_home"] + p["p_away"],
+            "Over 1.5": p["p_o15"], "Under 1.5": 1 - p["p_o15"], "Over 2.5": p["p_o25"],
+            "Under 2.5": 1 - p["p_o25"], "Over 3.5": p["p_o35"], "Under 3.5": 1 - p["p_o35"]}[pick]
+    odds = make_odds(prob, MARGIN_BOTD)
+    con.execute("UPDATE combo_legs SET pick=?, odds=?, prob=? WHERE combo_id=? AND match_id=?",
+                (pick, odds, prob, cid, mid))
+    legs = con.execute("SELECT odds, prob FROM combo_legs WHERE combo_id=?", (cid,)).fetchall()
+    total, chance = 1.0, 1.0
+    for o, pr in legs:
+        total *= o
+        chance *= pr
+    total = round(total, 2)
+    con.execute("UPDATE combos SET odds=?, prob=? WHERE id=?", (total, chance, cid))
+    con.commit()
+    return (f"🔄 Crazy Bet angepasst: {home} – {away}: {pick_label(old)} → {pick_label(pick)} (@{odds:.2f})\n"
+            f"Neue Gesamtquote @{total:.2f} · Chance laut Modell {chance:.1%} · bei Treffer "
+            f"{stake * total:,.2f} CHF".replace(",", "'"))
+
+
 def place_botd(con, now=None):
     """Stellt einmal pro Tag eine Kombiwette aus den sichersten Einzeltipps der heutigen Spiele
     zusammen. None = heute schon erledigt oder noch zu frueh, {} = heute nichts Passendes."""
@@ -534,6 +577,8 @@ def main():
                     help="neuer Multiplikator-Versuch: Dauer in Tagen")
     ap.add_argument("--crazy", type=float, default=_env_num("CRAZY"),
                     help="Crazy Bet fuer heute mit diesem Einsatz setzen")
+    ap.add_argument("--crazy-swap", default=(os.environ.get("CRAZY_SWAP") or None),
+                    help="Tipp in der offenen Crazy Bet tauschen: 'Team|Tipp', z.B. 'Wales|Under 3.5'")
     ap.add_argument("--regen", choices=["duel", "multi"], default=(os.environ.get("REGEN") or None),
                     help="offene Wette verwerfen und neu generieren (duel oder multi)")
     args = ap.parse_args()
@@ -577,6 +622,11 @@ def main():
     if args.crazy:                       # Crazy Bet auf Wunsch
         crazy_text = place_crazy(con, args.crazy)
         print("\n" + crazy_text)
+    if args.crazy_swap and "|" in args.crazy_swap:
+        team, pick = (x.strip() for x in args.crazy_swap.split("|", 1))
+        swap = swap_crazy_leg(con, team, pick)
+        print("\n" + swap)
+        crazy_text = (crazy_text + "\n\n" if crazy_text else "") + swap
     regen_text = None
     if args.regen:                       # Knopf "Neue Wette generieren" im Dashboard
         regen_text = (duel if args.regen == "duel" else multi).regenerate(con)
