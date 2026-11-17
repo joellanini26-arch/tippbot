@@ -29,7 +29,8 @@ NL_NAME = "UEFA Nations League"
 FIXTURES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nl_fixtures.csv")
 ALIASES = {"Türkiye": "Turkey", "Turkiye": "Turkey", "Czechia": "Czech Republic",
            "Ireland": "Republic of Ireland", "Bosnia-Herzegovina": "Bosnia and Herzegovina",
-           "Macedonia": "North Macedonia"}
+           "Macedonia": "North Macedonia", "N.Ireland": "Northern Ireland", "N. Ireland": "Northern Ireland",
+           "Bosnia & Herzegovina": "Bosnia and Herzegovina", "FYR Macedonia": "North Macedonia"}
 
 
 def _score(v):
@@ -215,19 +216,28 @@ def _sportsdb_last_nl():
 
 
 def _sportsdb_search(home, away, day):
-    found = []
-    for h, a in {(home, away), (_display(home), _display(away))}:
-        found += _sportsdb("searchevents.php", {"e": f"{h}_vs_{a}".replace(" ", "_"), "d": day.isoformat()})
-        if found:
-            break
-    return found
+    """Einzelsuche "Heim_vs_Gast" mit allen bekannten Schreibweisen, gefiltert auf die Saison."""
+    season = f"{day.year}-{day.year + 1}" if day.month >= 7 else f"{day.year - 1}-{day.year}"
+    tried = set()
+    for h in _variants(home):
+        for a in _variants(away):
+            if (h, a) in tried:
+                continue
+            tried.add((h, a))
+            found = _sportsdb("searchevents.php", {"e": f"{h}_vs_{a}".replace(" ", "_"), "s": season})
+            if found:
+                return found
+    return []
 
 
-DISPLAY = {"Turkey": "Türkiye", "Czech Republic": "Czechia"}
+# Schreibweisen bei TheSportsDB (die Suche braucht den exakten Namen)
+SPORTSDB_NAMES = {"Turkey": ["Türkiye"], "Czech Republic": ["Czechia"], "Northern Ireland": ["N.Ireland"],
+                  "Republic of Ireland": ["Ireland"], "Bosnia and Herzegovina": ["Bosnia-Herzegovina", "Bosnia"],
+                  "North Macedonia": ["Macedonia"]}
 
 
-def _display(name):
-    return DISPLAY.get(name, name)
+def _variants(name):
+    return [name] + SPORTSDB_NAMES.get(name, [])
 
 
 def online_results(con, now=None):
