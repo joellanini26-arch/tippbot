@@ -21,6 +21,10 @@ on:
         description: "Offene Wette neu generieren: duel oder multi (leer = nichts)"
         required: false
         default: ""
+      crazy:
+        description: "Crazy Bet fuer heute mit diesem Einsatz in CHF (leer = keine)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -69,6 +73,7 @@ jobs:
           MULTI_TARGET: ${{ inputs.multi_target }}
           MULTI_DAYS: ${{ inputs.multi_days }}
           REGEN: ${{ inputs.regen }}
+          CRAZY: ${{ inputs.crazy }}
         run: python paper.py
 
       - name: Dashboard bauen

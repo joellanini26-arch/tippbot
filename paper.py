@@ -69,12 +69,15 @@ def init_bets(con):
         PRIMARY KEY (match_id, kind)
     )""")
     calib.ensure_prob_column(con, MARGIN)
+    if "kind" not in [r[1] for r in con.execute("PRAGMA table_info(combos)")] and \
+            con.execute("SELECT 1 FROM sqlite_master WHERE name='combos'").fetchone():
+        con.execute("ALTER TABLE combos ADD COLUMN kind TEXT DEFAULT 'BOTD'")
     con.execute("CREATE TABLE IF NOT EXISTS botd_log (day TEXT PRIMARY KEY, match_id INTEGER)")
     con.execute("""
     CREATE TABLE IF NOT EXISTS combos (
         id INTEGER PRIMARY KEY AUTOINCREMENT, day TEXT,
         stake REAL, odds REAL, prob REAL, placed_at TEXT,
-        status TEXT DEFAULT 'OPEN', profit REAL, settled_at TEXT
+        status TEXT DEFAULT 'OPEN', profit REAL, settled_at TEXT, kind TEXT DEFAULT 'BOTD'
     )""")
     con.execute("""
     CREATE TABLE IF NOT EXISTS combo_legs (
@@ -284,6 +287,74 @@ def botd_candidates(p):
             ("Over 1.5", p["p_o15"]), ("Under 3.5", 1 - p["p_o35"])]
 
 
+# ---------- Crazy Bet: eine Kombi mit hoher Quote fuer heute (auf Wunsch) ----------
+CRAZY_ODDS = (40.0, 80.0)      # Ziel-Gesamtquote
+CRAZY_MIN_LEGS, CRAZY_MAX_LEGS = 4, 8
+
+
+def place_crazy(con, stake, now=None):
+    """Sucht unter den heutigen Spielen die Kombi mit Quote CRAZY_ODDS, die laut Modell am ehesten aufgeht,
+    und setzt sie als Fake-Wette (combos, kind CRAZY). Gibt den Text fuer Log/Telegram zurueck."""
+    now = now or datetime.now(timezone.utc)
+    day = now.astimezone(LOCAL_TZ).strftime("%Y-%m-%d")
+    games = []
+    for code, name in bot.LEAGUES.items():
+        try:
+            model = get_model(con, code)
+        except bot.NotEnoughData:
+            continue
+        n_games = model.get("n_games", {})
+        for mid, d, home, away in con.execute(
+                "SELECT id, utc_date, home, away FROM matches WHERE league=? AND status IN ('SCHEDULED','TIMED')",
+                (code,)).fetchall():
+            if d.endswith("T00:00:00Z"):
+                continue
+            ko = bot.parse_date(d)
+            if ko.astimezone(LOCAL_TZ).strftime("%Y-%m-%d") != day or ko < now + timedelta(minutes=15):
+                continue
+            if home not in model["att"] or away not in model["att"] or \
+                    min(n_games.get(home, 0), n_games.get(away, 0)) < BOTD_MIN_GAMES:
+                continue
+            p = bot.predict(model, home, away)
+            opts = [("1", p["p_home"]), ("X", p["p_draw"]), ("2", p["p_away"]),
+                    ("1X", p["p_home"] + p["p_draw"]), ("X2", p["p_draw"] + p["p_away"]),
+                    ("Over 2.5", p["p_o25"]), ("Under 2.5", 1 - p["p_o25"]),
+                    ("Over 1.5", p["p_o15"]), ("Under 3.5", 1 - p["p_o35"])]
+            opts = sorted(opts, key=lambda x: -x[1])[:6]
+            games.append([{"match_id": mid, "league": name, "home": home, "away": away, "utc": d, "pick": k,
+                           "prob": pr, "odds": make_odds(pr, MARGIN_BOTD)} for k, pr in opts])
+    # Strahlsuche: pro Spiel einen Tipp oder keinen; am Schluss Quote im Zielbereich, hoechste Chance
+    beam = [((), 1.0, 1.0)]
+    for opts in games:
+        nxt = list(beam)
+        for legs, o, pr in beam:
+            if len(legs) < CRAZY_MAX_LEGS:
+                nxt += [(legs + (l,), o * l["odds"], pr * l["prob"]) for l in opts if o * l["odds"] <= CRAZY_ODDS[1]]
+        # pro Anzahl Tipps die besten behalten (Chance x Quote), damit lange Kombis nicht herausfallen
+        by_len = {}
+        for x in nxt:
+            by_len.setdefault(len(x[0]), []).append(x)
+        beam = [y for xs in by_len.values() for y in sorted(xs, key=lambda x: -(x[2] * x[1]))[:3000]]
+    ok = [b for b in beam if CRAZY_ODDS[0] <= b[1] <= CRAZY_ODDS[1] and len(b[0]) >= CRAZY_MIN_LEGS]
+    if not ok:
+        return "Crazy Bet: heute gibt es nicht genug Spiele fuer eine Kombi mit dieser Quote."
+    legs, odds, prob = max(ok, key=lambda x: x[2])
+    odds = round(odds, 2)
+    legs = sorted(legs, key=lambda l: l["utc"])
+    cur = con.execute("INSERT INTO combos (day, stake, odds, prob, placed_at, kind) VALUES (?,?,?,?,?, 'CRAZY')",
+                      (day, stake, odds, prob, now.isoformat()))
+    con.executemany("INSERT INTO combo_legs (combo_id, match_id, pick, odds, prob) VALUES (?,?,?,?,?)",
+                    [(cur.lastrowid, l["match_id"], l["pick"], l["odds"], l["prob"]) for l in legs])
+    con.commit()
+    lines = [f"🤪 Crazy Bet: Kombi mit {len(legs)} Tipps, Einsatz {stake:.0f} CHF @{odds:.2f}"]
+    for i, l in enumerate(legs, 1):
+        ko = bot.parse_date(l["utc"]).astimezone(LOCAL_TZ).strftime("%H:%M")
+        lines.append(f"{i}) {l['league']} · {ko}  {l['home']} – {l['away']}: {pick_label(l['pick'])} (@{l['odds']:.2f})")
+    lines.append(f"Bei Treffer {stake * odds:,.2f} CHF · Chance laut Modell {prob:.1%} (etwa 1 zu {round(1 / prob)})"
+                 .replace(",", "'"))
+    return "\n".join(lines)
+
+
 def place_botd(con, now=None):
     """Stellt einmal pro Tag eine Kombiwette aus den sichersten Einzeltipps der heutigen Spiele
     zusammen. None = heute schon erledigt oder noch zu frueh, {} = heute nichts Passendes."""
@@ -461,6 +532,8 @@ def main():
                     help="neuer Multiplikator-Versuch: Ziel")
     ap.add_argument("--multi-days", type=float, default=_env_num("MULTI_DAYS"),
                     help="neuer Multiplikator-Versuch: Dauer in Tagen")
+    ap.add_argument("--crazy", type=float, default=_env_num("CRAZY"),
+                    help="Crazy Bet fuer heute mit diesem Einsatz setzen")
     ap.add_argument("--regen", choices=["duel", "multi"], default=(os.environ.get("REGEN") or None),
                     help="offene Wette verwerfen und neu generieren (duel oder multi)")
     args = ap.parse_args()
@@ -500,6 +573,10 @@ def main():
         botd_text = build_botd_text(botd, botd_record(con))
         print("\n" + build_botd_text(botd, botd_record(con), emoji=False))
 
+    crazy_text = None
+    if args.crazy:                       # Crazy Bet auf Wunsch
+        crazy_text = place_crazy(con, args.crazy)
+        print("\n" + crazy_text)
     regen_text = None
     if args.regen:                       # Knopf "Neue Wette generieren" im Dashboard
         regen_text = (duel if args.regen == "duel" else multi).regenerate(con)
@@ -527,7 +604,7 @@ def main():
 
     if args.no_telegram:
         pass
-    elif not results and not placed and botd is None and not multi_text and not duel_text and not regen_text:
+    elif not results and not placed and botd is None and not multi_text and not duel_text and not regen_text and not crazy_text:
         print("\nTelegram: nichts Neues, keine Nachricht gesendet")
     else:
         parts = []
@@ -539,6 +616,8 @@ def main():
             parts.append(duel_text)
         if regen_text:
             parts.append(regen_text)
+        if crazy_text:
+            parts.append(crazy_text)
         if results:
             parts.append(build_report(results, acc, emoji=True))
         if placed:
