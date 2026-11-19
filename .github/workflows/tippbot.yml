@@ -25,6 +25,10 @@ on:
         description: "Crazy Bet fuer heute mit diesem Einsatz in CHF (leer = keine)"
         required: false
         default: ""
+      custom_bet:
+        description: "Eigene Wette, Format Team|Tipp|Einsatz|Bezeichnung (z.B. Bayern|1|450|Mein Name)"
+        required: false
+        default: ""
       crazy_swap:
         description: "Tipp in der offenen Crazy Bet tauschen, Format Team|Tipp (z.B. Wales|Under 3.5)"
         required: false
@@ -79,6 +83,7 @@ jobs:
           REGEN: ${{ inputs.regen }}
           CRAZY: ${{ inputs.crazy }}
           CRAZY_SWAP: ${{ inputs.crazy_swap }}
+          CUSTOM_BET: ${{ inputs.custom_bet }}
         run: python paper.py
 
       - name: Dashboard bauen

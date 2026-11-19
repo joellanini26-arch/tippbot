@@ -295,8 +295,8 @@ const ICON = {
   modell: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>'
 };
 const TABS = [["tips","Tipps"],["duell","Duell"],["multi","Multi"],["konto","Konto"],["wetten","Wetten"],["tabelle","Tabelle"],["modell","Modell"]];
-const KIND = {"1X2":"Tipp","SCORE":"Resultat","OU":"Over/Under","BOTD":"Bet of the day","CRAZY":"Crazy Bet"};
-const COMBO_LABEL = k => k === "CRAZY" ? "🤪 Crazy Bet" : "⭐ Bet of the day";
+const KIND = {"1X2":"Tipp","SCORE":"Resultat","OU":"Over/Under","BOTD":"Bet of the day","CRAZY":"Crazy Bet","CUSTOM":"Eigene"};
+const COMBO_LABEL = (k, label) => k === "CRAZY" ? "🤪 Crazy Bet" : k === "CUSTOM" ? "📌 " + esc(label || "Eigene Wette") : "⭐ Bet of the day";
 const PICKS = {"1":"Heimsieg","2":"Auswärtssieg","X":"Unentschieden","1X":"Heimsieg oder Unentschieden","X2":"Auswärtssieg oder Unentschieden"};
 const pickLabel = p => p.startsWith("Over") ? "Über " + p.split(" ")[1] + " Tore" : p.startsWith("Under") ? "Unter " + p.split(" ")[1] + " Tore" : (PICKS[p] || p);
 const STATUS = {OPEN:"offen",WON:"gewonnen",LOST:"verloren",VOID:"storniert",CANCELLED:"verfallen",REPLACED:"ersetzt"};
@@ -841,7 +841,7 @@ function historyView() {
   const top = H.filter(r => r.status === "WON").sort((a, b) => b.profit - a.profit)[0];
   let streak = 0, cur = 0;
   H.forEach(r => { if (r.status === "WON") { cur++; streak = Math.max(streak, cur); } else if (r.status === "LOST") cur = 0; });
-  const label = r => r.legs ? COMBO_LABEL(r.kind) : `${esc(r.home)} – ${esc(r.away)}`;
+  const label = r => r.legs ? COMBO_LABEL(r.kind, r.label) : `${esc(r.home)} – ${esc(r.away)}`;
   let h = `<h2>Gewinn-Historie</h2><div class="grid">
     ${m("Bester Tag · " + longDay(best.day), chf(best.profit) + " CHF", cls(best.profit))}
     ${m("Schlechtester Tag · " + longDay(worst.day), chf(worst.profit) + " CHF", cls(worst.profit))}
@@ -853,7 +853,7 @@ function historyView() {
     const lines = d.bets.slice().sort((a, b) => b.profit - a.profit).map(r => {
       const what = r.legs ? `Kombi @${r.odds.toFixed(2)}` : `${KIND[r.kind]} <b>${esc(r.kind === "OU" ? pickLabel(r.pick) : r.pick)}</b> @${r.odds.toFixed(2)}`;
       const res = r.hg != null ? ` · ${r.hg}:${r.ag}` : "";
-      return `<div class="bl"><div class="l">${r.legs ? COMBO_LABEL(r.kind) : pair(r.home, r.away, 16)}<br><small>${what} · Einsatz ${r.stake.toFixed(2)} CHF${res}</small></div>
+      return `<div class="bl"><div class="l">${r.legs ? COMBO_LABEL(r.kind, r.label) : pair(r.home, r.away, 16)}<br><small>${what} · Einsatz ${r.stake.toFixed(2)} CHF${res}</small></div>
         <div class="r"><b class="${cls(r.profit)} num">${chf(r.profit)}</b>${badge(r.status)}</div></div>`;
     }).join("");
     return `<details class="card day"><summary><div class="l"><div class="t">${longDay(d.day)}</div>
@@ -944,7 +944,7 @@ function statusSeg(nRun, nOpen) {
 }
 
 function wetten() {
-  const kinds = ["ALL", "1X2", "SCORE", "OU", "BOTD", "CRAZY"];
+  const kinds = ["ALL", "1X2", "SCORE", "OU", "BOTD", "CRAZY", "CUSTOM"];
   const seg = '<div class="seg">' + kinds.map(k => `<button data-kind="${k}" class="${state.kind === k ? "on" : ""}">${k === "ALL" ? "Alle" : KIND[k]}</button>`).join("") + "</div>";
   const rows = D.bets.filter(r => inLeague(r) && (state.kind === "ALL" || r.kind === state.kind));
   if (!rows.length) return statusSeg(0, 0) + seg + '<div class="card empty">Noch keine Wetten.</div>';
@@ -982,7 +982,7 @@ function wetten() {
   } else if (LIVE.ok === false) top = '<div class="note">Live-Resultate sind gerade nicht erreichbar.</div>';
   if (!view.length) return segs + top + `<div class="card empty">${state.view === "live" ? "⚽ Gerade läuft kein Spiel mit einer offenen Wette." : "Keine offenen Wetten."}</div>`;
   return segs + top + view.map(c => {
-    if (!c.match) return `<div class="card star${c.kind === "CRAZY" ? " crazy" : ""}"><div class="bet"><div class="l"><div class="kicker">${COMBO_LABEL(c.kind)}</div>
+    if (!c.match) return `<div class="card star${c.kind === "CRAZY" ? " crazy" : ""}"><div class="bet"><div class="l"><div class="kicker">${COMBO_LABEL(c.kind, c.label)}</div>
         <div class="t">Kombi @${c.odds.toFixed(2)}</div><div class="s">${dt(c.utc)} · Einsatz ${c.stake.toFixed(2)} CHF</div></div>
         <div class="r">${right(c)}</div></div>${legList(c.legs)}${comboLive(c.legs, c.stake, c.odds, c.status === "OPEN")}</div>`;
     const ev = c.bets.some(b => b.status === "OPEN") ? liveOf(c.league, c.utc, c.home, c.away) : null;

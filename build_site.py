@@ -169,11 +169,11 @@ def build_data(con):
         return legs
 
     combos = []
-    for cid, day, stake, odds, prob, status, profit, kind in con.execute(
-            "SELECT id, day, stake, odds, prob, status, profit, COALESCE(kind,'BOTD') FROM combos "
+    for cid, day, stake, odds, prob, status, profit, kind, label in con.execute(
+            "SELECT id, day, stake, odds, prob, status, profit, COALESCE(kind,'BOTD'), label FROM combos "
             "ORDER BY id DESC LIMIT 200"):
         legs = combo_legs(cid)
-        combos.append({"kind": kind, "day": day, "stake": stake, "odds": odds, "prob": prob, "status": status,
+        combos.append({"kind": kind, "label": label, "day": day, "stake": stake, "odds": odds, "prob": prob, "status": status,
                        "profit": profit, "legs": legs, "league": "MIX",
                        "utc": legs[0]["utc"] if legs else day + "T00:00:00Z"})
     data["botd"] = next((c for c in combos if c["kind"] == "BOTD"), None)
@@ -199,7 +199,7 @@ def build_data(con):
             ORDER BY m.utc_date DESC, b.match_id, b.kind LIMIT ?""", (MAX_BETS,))]
     for c in combos:
         data["bets"].append({"league": "MIX", "utc": c["utc"], "home": "Kombi", "away": "",
-                             "kind": c["kind"], "pick": "", "stake": c["stake"], "odds": c["odds"],
+                             "kind": c["kind"], "label": c["label"], "pick": "", "stake": c["stake"], "odds": c["odds"],
                              "status": c["status"], "profit": c["profit"], "hg": None, "ag": None,
                              "legs": c["legs"]})
     data["bets"].sort(key=lambda b: b["utc"], reverse=True)
@@ -234,7 +234,7 @@ def history(con, combos, now):
         if d < cutoff:
             older += c["profit"] or 0
             continue
-        rows.append({"day": d, "utc": c["utc"], "league": "MIX", "home": "Kombi", "away": "", "kind": c["kind"],
+        rows.append({"day": d, "utc": c["utc"], "league": "MIX", "home": "Kombi", "away": "", "kind": c["kind"], "label": c["label"],
                      "pick": "", "stake": c["stake"], "odds": c["odds"], "status": c["status"],
                      "profit": round(c["profit"] or 0, 2), "legs": c["legs"]})
     rows.sort(key=lambda r: r["utc"])

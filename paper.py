@@ -10,6 +10,7 @@ Liegt im selben Ordner wie bot.py.
 """
 import argparse
 import itertools
+import math
 import os
 import sqlite3
 import sys
@@ -72,12 +73,15 @@ def init_bets(con):
     if "kind" not in [r[1] for r in con.execute("PRAGMA table_info(combos)")] and \
             con.execute("SELECT 1 FROM sqlite_master WHERE name='combos'").fetchone():
         con.execute("ALTER TABLE combos ADD COLUMN kind TEXT DEFAULT 'BOTD'")
+    if "label" not in [r[1] for r in con.execute("PRAGMA table_info(combos)")] and \
+            con.execute("SELECT 1 FROM sqlite_master WHERE name='combos'").fetchone():
+        con.execute("ALTER TABLE combos ADD COLUMN label TEXT")
     con.execute("CREATE TABLE IF NOT EXISTS botd_log (day TEXT PRIMARY KEY, match_id INTEGER)")
     con.execute("""
     CREATE TABLE IF NOT EXISTS combos (
         id INTEGER PRIMARY KEY AUTOINCREMENT, day TEXT,
         stake REAL, odds REAL, prob REAL, placed_at TEXT,
-        status TEXT DEFAULT 'OPEN', profit REAL, settled_at TEXT, kind TEXT DEFAULT 'BOTD'
+        status TEXT DEFAULT 'OPEN', profit REAL, settled_at TEXT, kind TEXT DEFAULT 'BOTD', label TEXT
     )""")
     con.execute("""
     CREATE TABLE IF NOT EXISTS combo_legs (
@@ -398,6 +402,40 @@ def swap_crazy_leg(con, team, pick, now=None):
             f"{stake * total:,.2f} CHF".replace(",", "'"))
 
 
+# ---------- Eigene Wette (auf Wunsch, mit Bezeichnung) ----------
+def place_custom(con, team, pick, stake, label, now=None):
+    """Setzt eine Einzelwette auf das naechste Spiel von `team` (Modell-Quote) als combos-Eintrag mit
+    kind CUSTOM und eigener Bezeichnung. Gibt den Text fuer Log/Telegram zurueck."""
+    now = now or datetime.now(timezone.utc)
+    if pick not in CRAZY_PICKS:
+        return f"Eigene Wette: unbekannter Tipp '{pick}'."
+    row = con.execute("""SELECT id, utc_date, league, home, away FROM matches
+                         WHERE status IN ('SCHEDULED','TIMED') AND (home=? OR away=?) AND utc_date > ?
+                         ORDER BY utc_date LIMIT 1""",
+                      (team, team, (now + timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%SZ"))).fetchone()
+    if not row:
+        return f"Eigene Wette: kein kommendes Spiel mit {team} gefunden."
+    mid, utc, league, home, away = row
+    p = bot.predict(get_model(con, league), home, away)
+    prob = {"1": p["p_home"], "X": p["p_draw"], "2": p["p_away"], "1X": p["p_home"] + p["p_draw"],
+            "X2": p["p_draw"] + p["p_away"], "12": p["p_home"] + p["p_away"],
+            "Over 1.5": p["p_o15"], "Under 1.5": 1 - p["p_o15"], "Over 2.5": p["p_o25"],
+            "Under 2.5": 1 - p["p_o25"], "Over 3.5": p["p_o35"], "Under 3.5": 1 - p["p_o35"]}[pick]
+    odds = make_odds(prob, MARGIN_BOTD)
+    if isinstance(stake, str):            # "+18" = Einsatz so waehlen, dass der Gewinn 18 CHF ist
+        target = float(stake.lstrip("+"))
+        stake = math.ceil(target / (odds - 1) * 2) / 2
+    day = bot.parse_date(utc).astimezone(LOCAL_TZ).strftime("%Y-%m-%d")
+    cur = con.execute("INSERT INTO combos (day, stake, odds, prob, placed_at, kind, label) VALUES (?,?,?,?,?, 'CUSTOM', ?)",
+                      (day, stake, odds, prob, now.isoformat(), label))
+    con.execute("INSERT INTO combo_legs (combo_id, match_id, pick, odds, prob) VALUES (?,?,?,?,?)",
+                (cur.lastrowid, mid, pick, odds, prob))
+    con.commit()
+    ko = bot.parse_date(utc).astimezone(LOCAL_TZ)
+    return (f"📌 {label}: {home} – {away} ({ko:%d.%m. %H:%M}), {pick_label(pick)} @{odds:.2f}\n"
+            f"Einsatz {stake:.0f} CHF · bei Treffer +{stake * (odds - 1):.2f} CHF · Chance laut Modell {prob:.0%}")
+
+
 def place_botd(con, now=None):
     """Stellt einmal pro Tag eine Kombiwette aus den sichersten Einzeltipps der heutigen Spiele
     zusammen. None = heute schon erledigt oder noch zu frueh, {} = heute nichts Passendes."""
@@ -579,6 +617,8 @@ def main():
                     help="Crazy Bet fuer heute mit diesem Einsatz setzen")
     ap.add_argument("--crazy-swap", default=(os.environ.get("CRAZY_SWAP") or None),
                     help="Tipp in der offenen Crazy Bet tauschen: 'Team|Tipp', z.B. 'Wales|Under 3.5'")
+    ap.add_argument("--custom-bet", default=(os.environ.get("CUSTOM_BET") or None),
+                    help="eigene Wette: 'Team|Tipp|Einsatz|Bezeichnung'; Einsatz '+18' = so viel, dass 18 CHF Gewinn")
     ap.add_argument("--regen", choices=["duel", "multi"], default=(os.environ.get("REGEN") or None),
                     help="offene Wette verwerfen und neu generieren (duel oder multi)")
     args = ap.parse_args()
@@ -627,6 +667,14 @@ def main():
         swap = swap_crazy_leg(con, team, pick)
         print("\n" + swap)
         crazy_text = (crazy_text + "\n\n" if crazy_text else "") + swap
+    if args.custom_bet and args.custom_bet.count("|") >= 3:
+        team, pick, stake, label = (x.strip() for x in args.custom_bet.split("|", 3))
+        try:
+            custom = place_custom(con, team, pick, stake if stake.startswith("+") else float(stake), label)
+        except ValueError:
+            custom = f"Eigene Wette: Einsatz '{stake}' ist keine Zahl."
+        print("\n" + custom)
+        crazy_text = (crazy_text + "\n\n" if crazy_text else "") + custom
     regen_text = None
     if args.regen:                       # Knopf "Neue Wette generieren" im Dashboard
         regen_text = (duel if args.regen == "duel" else multi).regenerate(con)
