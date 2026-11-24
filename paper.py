@@ -22,6 +22,7 @@ import daygame
 import duel
 import multi
 import notify
+import tgfmt
 
 # ---------- Einstellungen ----------
 START_BALANCE = 1000.0   # virtuelles Startguthaben in CHF
@@ -167,7 +168,7 @@ def place_bets(con, days):
                     "INSERT OR IGNORE INTO bets (match_id, kind, pick, stake, odds, placed_at, prob) "
                     "VALUES (?,?,?,?,?,?,?)", (mid, kind, pick, stake, odds, now.isoformat(), prob))
                 if cur.rowcount:
-                    placed.append((name, home, away, kind, pick, stake, odds))
+                    placed.append((name, home, away, kind, pick, stake, odds, d))
     con.commit()
     return placed
 
@@ -217,8 +218,8 @@ def settle_combos(con):
     Verschobene/abgesagte Spiele werden aus der Kombi genommen (Quote ohne diesen Tipp)."""
     now = datetime.now(timezone.utc).isoformat()
     results = []
-    for cid, stake, odds in con.execute(
-            "SELECT id, stake, odds FROM combos WHERE status='OPEN'").fetchall():
+    for cid, stake, odds, ckind, clabel in con.execute(
+            "SELECT id, stake, odds, COALESCE(kind,'BOTD'), label FROM combos WHERE status='OPEN'").fetchall():
         legs = []
         for mid, pick, lodds, home, away, hg, ag, mstatus in con.execute("""
                 SELECT l.match_id, l.pick, l.odds, m.home, m.away, m.home_goals, m.away_goals, m.status
@@ -250,7 +251,7 @@ def settle_combos(con):
                 status, profit = "WON", round(stake * (odds - 1), 2)   # sonst: gespeicherte Kombi-Quote
         con.execute("UPDATE combos SET status=?, profit=?, odds=?, settled_at=? WHERE id=?",
                     (status, profit, odds, now, cid))
-        results.append({"kind": "BOTD", "combo": True, "home": "Kombi", "away": f"{len(legs)} Tipps",
+        results.append({"kind": "BOTD", "ckind": ckind, "label": clabel, "combo": True, "home": "Kombi", "away": f"{len(legs)} Tipps",
                         "pick": "", "actual": "", "stake": stake, "odds": odds,
                         "status": status, "profit": profit, "legs": legs})
     con.commit()
@@ -574,7 +575,7 @@ def build_tips_text(placed, emoji=False):
         return "Keine neuen Wetten platziert."
     title = "\u26bd Neue Tipps:" if emoji else "Neue Tipps:"
     by_league = {}
-    for league, home, away, kind, pick, stake, odds in placed:
+    for league, home, away, kind, pick, stake, odds, _ in placed:
         by_league.setdefault(league, {}).setdefault((home, away), {})[kind] = (pick, odds, stake)
     lines = [title]
     for league, games in by_league.items():
@@ -648,7 +649,7 @@ def main():
 
     placed = place_bets(con, args.days)
     print(f"\nNeu platziert: {len(placed)} Wetten")
-    for league, home, away, kind, pick, stake, odds in placed:
+    for league, home, away, kind, pick, stake, odds, _ in placed:
         what = KIND_LABEL[kind]
         print(f"  [{league}] {home} - {away}: {what} {pick} @{odds:.2f}, Einsatz {stake:.2f} CHF")
 
@@ -705,22 +706,20 @@ def main():
     elif not results and not placed and botd is None and not multi_text and not duel_text and not regen_text and not crazy_text:
         print("\nTelegram: nichts Neues, keine Nachricht gesendet")
     else:
-        parts = []
-        if botd_text:
-            parts.append(botd_text)
-        if multi_text:
-            parts.append(multi_text)
-        if duel_text:
-            parts.append(duel_text)
-        if regen_text:
-            parts.append(regen_text)
-        if crazy_text:
-            parts.append(crazy_text)
+        # Ein Thema pro Nachricht, uebersichtlich formatiert (tgfmt)
+        msgs = []
         if results:
-            parts.append(build_report(results, acc, emoji=True))
+            msgs.append(tgfmt.settled(results, acc))
+        if botd is not None:
+            msgs.append(tgfmt.botd(botd, botd_record(con), STAKE_BOTD,
+                                   f"Einzeltipps ab {BOTD_LEG_MIN_PROB:.0%}, Kombi ab @{BOTD_TARGET_ODDS:.2f}"))
         if placed:
-            parts.append(build_tips_text(placed, emoji=True))
-        print("\nTelegram:", "gesendet" if notify.send("\n\n".join(parts)) else "nicht gesendet")
+            msgs.append(tgfmt.new_tips(placed))
+        for t in (multi_text, duel_text, regen_text, crazy_text):
+            if t:
+                msgs.append(tgfmt.block(t))
+        ok = all([notify.send(m, html=True) for m in msgs])
+        print("\nTelegram:", f"{len(msgs)} Nachrichten gesendet" if ok else "nicht (alles) gesendet")
     con.close()
 
 

@@ -43,8 +43,15 @@ def api(method, **params):
     return r.json().get("result")
 
 
-def send(text, chat_id=None):
-    """Sendet Text an Telegram. Gibt True bei Erfolg zurueck."""
+def _plain(text):
+    """HTML-Formatierung entfernen (Rueckfall, falls Telegram das HTML ablehnt)."""
+    import html
+    import re
+    return html.unescape(re.sub(r"</?(b|i|code)>", "", text))
+
+
+def send(text, chat_id=None, html=False):
+    """Sendet Text an Telegram (mit html=True als Telegram-HTML). Gibt True bei Erfolg zurueck."""
     token = os.environ.get("TELEGRAM_TOKEN")
     chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
@@ -52,8 +59,14 @@ def send(text, chat_id=None):
         return False
     for chunk in _split(text):
         try:
-            r = requests.post(API.format(token=token, method="sendMessage"),
-                              data={"chat_id": chat_id, "text": chunk}, timeout=30)
+            data = {"chat_id": chat_id, "text": chunk, "disable_web_page_preview": True}
+            if html:
+                data["parse_mode"] = "HTML"
+            r = requests.post(API.format(token=token, method="sendMessage"), data=data, timeout=30)
+            if html and r.status_code == 400:          # HTML abgelehnt: unformatiert senden
+                data.pop("parse_mode")
+                data["text"] = _plain(chunk)
+                r = requests.post(API.format(token=token, method="sendMessage"), data=data, timeout=30)
         except requests.RequestException as e:
             # Fehlertext nicht ausgeben: er koennte den Token in der URL enthalten
             print("Telegram: Verbindungsfehler", type(e).__name__)
