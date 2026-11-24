@@ -29,6 +29,7 @@ LEAGUES = {
     "BL1": "Bundesliga",
     "SA": "Serie A",
     "FL1": "Ligue 1",
+    "CL": "Champions League",
     # "ELC": "Championship",
     # "DED": "Eredivisie",
     # "PPL": "Primeira Liga",
@@ -37,7 +38,9 @@ LEAGUES = {
 
 # Sonderregeln fuer Nationalmannschaften: Training mit allen Laenderspielen,
 # laengere Halbwertszeit (Nationalteams spielen selten) und staerkere Schrumpfung.
-LEAGUE_MODEL = {"NL": {"train": ("NL", "INT"), "half_life": 540, "prior": 6}}
+LEAGUE_MODEL = {"NL": {"train": ("NL", "INT"), "half_life": 540, "prior": 6},
+                # Champions League: Teams aus verschiedenen Ligen, darum mit allen Ligaspielen trainieren
+                "CL": {"train": ("CL", "PL", "PD", "BL1", "SA", "FL1"), "half_life": 150, "prior": 4}}
 NO_TABLE = {"NL"}        # keine Tabelle (Gruppen sind in den Daten nicht enthalten)
 
 REQUEST_PAUSE = 7        # Sekunden zwischen API-Aufrufen (Limit: 10 pro Minute)
